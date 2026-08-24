@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
-import { ActivityLog } from '@/lib/models/Activity'
+import { ActivityLog, IActivityLog } from '@/lib/models/Activity'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
@@ -10,13 +10,13 @@ export async function GET() {
 
   await connectToDatabase()
 
-  const activities = await ActivityLog.find({ userId: session.user.id })
+  const activities = (await ActivityLog.find({ userId: session.user.id })
     .sort({ createdAt: -1 })
     .limit(50)
-    .lean()
+    .lean()) as unknown as IActivityLog[]
 
   const formatted = activities.map((a) => ({
-    id: a._id.toString(),
+    id: String(a._id),
     type: a.type,
     status: a.status,
     message: a.message,
