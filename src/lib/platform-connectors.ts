@@ -114,7 +114,7 @@ export class PlatformNotConfiguredError extends Error {
   }
 }
 
-class YouTubeConnector implements PlatformConnector {
+export class YouTubeConnector implements PlatformConnector {
   platform: PlatformKey = 'YOUTUBE'
 
   private getRedirectUri(): string {
@@ -125,7 +125,7 @@ class YouTubeConnector implements PlatformConnector {
   getAuthorizeUrl(state: string): string {
     const clientId = process.env.YOUTUBE_CLIENT_ID?.replace(/^["']|["']$/g, '').trim()
     const redirectUri = this.getRedirectUri()
-    const scope = encodeURIComponent('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly')
+    const scope = encodeURIComponent('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl')
     return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=${encodeURIComponent(state)}`
   }
 
@@ -173,6 +173,33 @@ class YouTubeConnector implements PlatformConnector {
     } catch {}
 
     return { accessToken, refreshToken, expiresAt, accountName, externalAccountId }
+  }
+
+  async refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; expiresAt?: Date }> {
+    const clientId = process.env.YOUTUBE_CLIENT_ID?.replace(/^["']|["']$/g, '').trim()
+    const clientSecret = process.env.YOUTUBE_CLIENT_SECRET?.replace(/^["']|["']$/g, '').trim()
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId || '',
+        client_secret: clientSecret || '',
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token'
+      })
+    })
+
+    if (!tokenRes.ok) {
+      const err = await tokenRes.text()
+      throw new Error(`YouTube token refresh failed: ${err}`)
+    }
+
+    const tokenData = await tokenRes.json()
+    const accessToken = tokenData.access_token
+    const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : undefined
+
+    return { accessToken, expiresAt }
   }
 
   async publish(accessToken: string, input: PublishInput): Promise<PublishResult> {
@@ -233,6 +260,127 @@ class YouTubeConnector implements PlatformConnector {
     return {
       platformPostId: data.id || 'youtube-video-id',
       platformPostUrl: data.id ? `https://www.youtube.com/watch?v=${data.id}` : 'https://www.youtube.com/'
+    }
+  }
+
+  async createLiveBroadcast(
+    accessToken: string,
+    title: string,
+    description?: string
+  ): Promise<{ broadcastId: string; streamId: string; rtmpUrl: string; streamKey: string; platformPostUrl: string }> {
+    // 1. Create Live Broadcast
+    const broadcastRes = await fetch('https://www.googleapis.com/youtube/v3/liveBroadcasts?part=snippet,status,contentDetails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        snippet: {
+          title,
+          description: description || '',
+          scheduledStartTime: new Date().toISOString()
+        },
+        status: {
+          privacyStatus: 'public',
+          selfDeclaredMadeForKids: false
+        },
+        contentDetails: {
+          enableAutoStart: true,
+          enableAutoStop: true
+        }
+      })
+    })
+
+    if (!broadcastRes.ok) {
+      const errText = await broadcastRes.text()
+      let parsedErr = errText
+      try {
+        const json = JSON.parse(errText)
+        if (json.error?.message) parsedErr = json.error.message
+      } catch {}
+      throw new Error(`YouTube Live Broadcast creation failed: ${parsedErr}`)
+    }
+    const broadcastData = await broadcastRes.json()
+
+    // 2. Create Live Stream
+    const streamRes = await fetch('https://www.googleapis.com/youtube/v3/liveStreams?part=snippet,cdn', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        snippet: {
+          title: `${title} Stream`
+        },
+        cdn: {
+          ingestionType: 'rtmp',
+          resolution: 'variable',
+          frameRate: 'variable'
+        }
+      })
+    })
+
+    if (!streamRes.ok) {
+      const errText = await streamRes.text()
+      let parsedErr = errText
+      try {
+        const json = JSON.parse(errText)
+        if (json.error?.message) parsedErr = json.error.message
+      } catch {}
+      throw new Error(`YouTube Live Stream creation failed: ${parsedErr}`)
+    }
+    const streamData = await streamRes.json()
+
+    // 3. Bind Broadcast to Stream
+    const bindRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/liveBroadcasts/bind?id=${broadcastData.id}&part=id,contentDetails&streamId=${streamData.id}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` }
+      }
+    )
+
+    if (!bindRes.ok) {
+      const errText = await bindRes.text()
+      let parsedErr = errText
+      try {
+        const json = JSON.parse(errText)
+        if (json.error?.message) parsedErr = json.error.message
+      } catch {}
+      throw new Error(`YouTube Live Broadcast bind failed: ${parsedErr}`)
+    }
+
+    const ingestionInfo = streamData.cdn?.ingestionInfo
+    const rtmpUrl = ingestionInfo?.ingestionAddress || 'rtmp://a.rtmp.youtube.com/live2'
+    const streamKey = ingestionInfo?.streamName || ''
+
+    return {
+      broadcastId: broadcastData.id,
+      streamId: streamData.id,
+      rtmpUrl,
+      streamKey,
+      platformPostUrl: `https://www.youtube.com/watch?v=${broadcastData.id}`
+    }
+  }
+
+  async transitionLiveBroadcast(accessToken: string, broadcastId: string, status: 'live' | 'complete'): Promise<void> {
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/liveBroadcasts/transition?id=${broadcastId}&broadcastStatus=${status}&part=id,status`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` }
+      }
+    )
+    if (!res.ok) {
+      const errText = await res.text()
+      let parsedErr = errText
+      try {
+        const json = JSON.parse(errText)
+        if (json.error?.message) parsedErr = json.error.message
+      } catch {}
+      throw new Error(`YouTube Live Broadcast transition failed: ${parsedErr}`)
     }
   }
 }

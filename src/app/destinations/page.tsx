@@ -6,7 +6,6 @@ import { Card, SectionHeading, ConnectionLabel, PlatformIcon, Button, EmptyState
 import { PLATFORM_META } from '@/components/ui'
 import { PlatformKey, DestinationItem } from '@/lib/types'
 import { Plus, Settings2, Users } from 'lucide-react'
-import { PLATFORM_CONFIG, isPlatformConfigured } from '@/lib/platform-connectors'
 
 const GROUPS = [{ id: 'g1', name: 'Sunday Service', memberIds: ['d1', 'd2'] }]
 
@@ -14,11 +13,8 @@ const ALL_PLATFORMS: PlatformKey[] = ['YOUTUBE', 'TIKTOK', 'FACEBOOK', 'TWITCH',
 
 export default function DestinationsPage() {
   const [dbDestinations, setDbDestinations] = useState<DestinationItem[]>([])
+  const [configuredMap, setConfiguredMap] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
-  // Prevent hydration mismatch: isPlatformConfigured reads process.env which
-  // differs between the SSR pass (env vars present) and the client hydration
-  // pass (env vars absent). We defer all env-dependent rendering until after
-  // the component has mounted on the client.
   const [mounted, setMounted] = useState(false)
 
   const loadDestinations = async () => {
@@ -27,6 +23,9 @@ export default function DestinationsPage() {
       if (res.ok) {
         const data = await res.json()
         setDbDestinations(data.destinations || [])
+        if (data.configuredPlatforms) {
+          setConfiguredMap(data.configuredPlatforms)
+        }
       }
     } catch {} finally {
       setLoading(false)
@@ -72,7 +71,7 @@ export default function DestinationsPage() {
         status: existing.status
       }
     }
-    const configured = isPlatformConfigured(platform)
+    const configured = configuredMap[platform] ?? false
     return {
       id: platform,
       platform,
@@ -91,9 +90,7 @@ export default function DestinationsPage() {
       </div>
 
       <SectionHeading title="Platforms" />
-      {!mounted ? (
-        // Identical on server and client — prevents hydration mismatch from
-        // isPlatformConfigured() reading process.env differently in each pass.
+      {!mounted || loading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {ALL_PLATFORMS.map((p) => (
             <Card key={p} className="animate-pulse !p-5">
@@ -104,37 +101,37 @@ export default function DestinationsPage() {
           ))}
         </div>
       ) : (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {platformCards.map((d) => {
-          const meta = PLATFORM_META[d.platform]
-          return (
-            <Card key={d.id}>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <PlatformIcon platform={d.platform} size={20} />
-                  <div>
-                    <p className="text-sm font-semibold text-ink-800">{meta.label}</p>
-                    <p className="text-xs text-slate-400">{d.accountName ?? 'No account connected'}</p>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {platformCards.map((d) => {
+            const meta = PLATFORM_META[d.platform]
+            return (
+              <Card key={d.id}>
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <PlatformIcon platform={d.platform} size={20} />
+                    <div>
+                      <p className="text-sm font-semibold text-ink-800">{meta.label}</p>
+                      <p className="text-xs text-slate-400">{d.accountName ?? 'No account connected'}</p>
+                    </div>
                   </div>
+                  {d.status === 'CONNECTED' && (
+                    <button className="focus-ring rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Settings"><Settings2 size={16} /></button>
+                  )}
                 </div>
-                {d.status === 'CONNECTED' && (
-                  <button className="focus-ring rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Settings"><Settings2 size={16} /></button>
-                )}
-              </div>
-              <div className="mt-4 flex items-center justify-between">
-                <ConnectionLabel status={d.status} />
-                {d.status === 'CONNECTED' ? (
-                  <Button variant="outline" size="sm" onClick={() => handleDisconnect(d.id, d.platform)}>Disconnect</Button>
-                ) : d.status === 'SETUP_REQUIRED' ? (
-                  <Button variant="outline" size="sm" disabled title="Awaiting API credentials — see .env.example">Setup required</Button>
-                ) : (
-                  <Button size="sm" onClick={() => handleConnect(d.platform)}><Plus size={13} /> Connect</Button>
-                )}
-              </div>
-            </Card>
-          )
-        })}
-      </div>
+                <div className="mt-4 flex items-center justify-between">
+                  <ConnectionLabel status={d.status} />
+                  {d.status === 'CONNECTED' ? (
+                    <Button variant="outline" size="sm" onClick={() => handleDisconnect(d.id, d.platform)}>Disconnect</Button>
+                  ) : d.status === 'SETUP_REQUIRED' ? (
+                    <Button variant="outline" size="sm" disabled title="Awaiting API credentials — see .env.example">Setup required</Button>
+                  ) : (
+                    <Button size="sm" onClick={() => handleConnect(d.platform)}><Plus size={13} /> Connect</Button>
+                  )}
+                </div>
+              </Card>
+            )
+          })}
+        </div>
       )}
 
       <div className="mt-10">

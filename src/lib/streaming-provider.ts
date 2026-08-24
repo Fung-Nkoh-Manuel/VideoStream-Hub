@@ -52,39 +52,60 @@ class UnconfiguredStreamingProvider implements StreamingProvider {
 }
 
 class LivepeerStreamingProvider implements StreamingProvider {
-  private baseUrl: string
+  private baseUrls: string[]
 
   constructor(private apiKey: string, baseUrl?: string) {
-    const rawUrl = baseUrl || process.env.STREAM_PROVIDER_API_URL || 'https://livepeer.studio/api'
-    this.baseUrl = rawUrl.replace(/\/+$/, '')
+    const customUrl = baseUrl || process.env.STREAM_PROVIDER_API_URL
+    if (customUrl && customUrl.trim() !== '') {
+      this.baseUrls = [customUrl.replace(/\/+$/, '')]
+    } else {
+      this.baseUrls = ['https://livepeer.studio/api', 'https://livepeer.com/api']
+    }
   }
 
   private async request(path: string, init?: RequestInit) {
-    const url = `${this.baseUrl}${path.startsWith('/') ? path : '/' + path}`
-    const res = await fetch(url, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        ...(init?.headers ?? {})
-      }
-    })
+    const formattedPath = path.startsWith('/') ? path : '/' + path
+    let lastError: Error | null = null
 
-    if (!res.ok) {
-      let errText = res.statusText
+    for (const base of this.baseUrls) {
+      const url = `${base}${formattedPath}`
       try {
-        const errJson = await res.json()
-        if (Array.isArray(errJson?.errors) && errJson.errors[0]) {
-          errText = errJson.errors[0]
-        } else if (errJson?.message) {
-          errText = errJson.message
+        const res = await fetch(url, {
+          ...init,
+          signal: AbortSignal.timeout(12000),
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+            ...(init?.headers ?? {})
+          }
+        })
+
+        if (!res.ok) {
+          let errText = res.statusText
+          try {
+            const errJson = await res.json()
+            if (Array.isArray(errJson?.errors) && errJson.errors[0]) {
+              errText = errJson.errors[0]
+            } else if (errJson?.message) {
+              errText = errJson.message
+            }
+          } catch {}
+          throw new StreamingProviderError(`Livepeer API error (${res.status}): ${errText}`)
         }
-      } catch {}
-      throw new StreamingProviderError(`Livepeer API error (${res.status}): ${errText}`)
+
+        if (res.status === 204) return null
+        return await res.json()
+      } catch (err: any) {
+        lastError = err
+        if (err instanceof StreamingProviderError) {
+          throw err
+        }
+      }
     }
 
-    if (res.status === 204) return null
-    return res.json()
+    throw new StreamingProviderError(
+      `Could not connect to Livepeer API (Network timeout or server unreachable). Details: ${lastError?.message || 'Connection failed'}`
+    )
   }
 
   async createStream(input: { title: string; ingestPreset?: string }): Promise<{ streamId: string; rtmpIngestUrl: string; streamKey: string }> {
@@ -118,40 +139,15 @@ class LivepeerStreamingProvider implements StreamingProvider {
     })
 
     const targetId = targetData.id
-    const stream = await this.request(`/stream/${streamId}`)
-    const existingTargets = stream?.multistream?.targets || []
-
-    await this.request(`/stream/${streamId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        multistream: {
-          targets: [...existingTargets, { id: targetId, profile: 'source' }]
-        }
-      })
+    await this.request(`/stream/${streamId}/multistream/target/${targetId}`, {
+      method: 'POST'
     })
   }
 
   async removeDestination(streamId: string, destinationId: string): Promise<void> {
-    const stream = await this.request(`/stream/${streamId}`)
-    const targets: Array<{ id: string; profile?: string; name?: string }> = stream?.multistream?.targets || []
-
-    const targetToRemove = targets.find((t) => t.id === destinationId || t.name === destinationId)
-    const updatedTargets = targets.filter((t) => t.id !== destinationId && t.name !== destinationId)
-
-    await this.request(`/stream/${streamId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        multistream: {
-          targets: updatedTargets
-        }
-      })
+    await this.request(`/stream/${streamId}/multistream/target/${destinationId}`, {
+      method: 'DELETE'
     })
-
-    if (targetToRemove?.id) {
-      try {
-        await this.request(`/multistream/target/${targetToRemove.id}`, { method: 'DELETE' })
-      } catch {}
-    }
   }
 
   async startStream(streamId: string): Promise<void> {
@@ -162,52 +158,34 @@ class LivepeerStreamingProvider implements StreamingProvider {
   }
 
   async stopStream(streamId: string): Promise<void> {
-    try {
-      await this.request(`/stream/${streamId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ suspended: true })
-      })
-    } catch {}
-
-    try {
-      await this.request(`/stream/${streamId}/terminate`, { method: 'POST' })
-    } catch {}
+    await this.request(`/stream/${streamId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ suspended: true })
+    })
   }
 
   async getStatus(streamId: string): Promise<ProviderStreamStatus> {
-    const stream = await this.request(`/stream/${streamId}`)
+    const data = await this.request(`/stream/${streamId}`)
 
-    let status: 'idle' | 'starting' | 'live' | 'stopping' | 'ended' | 'error' = 'idle'
-    if (stream?.isActive) {
-      status = 'live'
-    } else if (stream?.suspended) {
-      status = 'ended'
-    }
+    const isActive = Boolean(data.isActive)
+    const isSuspended = Boolean(data.suspended)
+    const status: ProviderStreamStatus['status'] = isActive
+      ? 'live'
+      : isSuspended
+      ? 'ended'
+      : 'idle'
 
     let health: StreamHealth = 'unknown'
-    if (stream?.health) {
-      if (typeof stream.health === 'string' && ['excellent', 'fair', 'poor', 'unknown'].includes(stream.health)) {
-        health = stream.health as StreamHealth
-      } else if (typeof stream.health === 'object' && stream.health.status) {
-        const s = String(stream.health.status).toLowerCase()
-        if (['healthy', 'good', 'excellent'].includes(s)) health = 'excellent'
-        else if (s === 'fair') health = 'fair'
-        else if (['unhealthy', 'poor', 'bad'].includes(s)) health = 'poor'
-      }
+    if (data.health) {
+      if (data.health.healthy) health = 'excellent'
+      else if (data.health.issues?.length > 0) health = 'fair'
+      else health = 'poor'
     }
 
-    const destinations = (stream?.multistream?.targets || []).map((t: any) => {
-      let destStatus: 'pending' | 'live' | 'stopped' | 'error' = 'pending'
-      if (t.status?.phase === 'online' || t.status?.phase === 'ready') destStatus = 'live'
-      else if (t.status?.phase === 'failed') destStatus = 'error'
-      else if (!stream?.isActive) destStatus = 'stopped'
-
-      return {
-        destinationId: t.name || t.id,
-        status: destStatus,
-        errorMessage: t.status?.errorMessage
-      }
-    })
+    const destinations: ProviderStreamStatus['destinations'] = (data.multistream?.targets || []).map((t: any) => ({
+      destinationId: t.id,
+      status: t.active ? 'live' : 'stopped'
+    }))
 
     return {
       streamId,
@@ -227,12 +205,15 @@ class LivepeerStreamingProvider implements StreamingProvider {
   }
 }
 
-export function getStreamingProvider(): StreamingProvider {
-  const apiKey = process.env.STREAM_PROVIDER_API_KEY
-  if (apiKey) return new LivepeerStreamingProvider(apiKey)
-  return new UnconfiguredStreamingProvider()
+export function isStreamingConfigured(): boolean {
+  const key = process.env.STREAM_PROVIDER_API_KEY
+  return Boolean(key && key.trim().length > 0)
 }
 
-export function isStreamingConfigured(): boolean {
-  return Boolean(process.env.STREAM_PROVIDER_API_KEY)
+export function getStreamingProvider(): StreamingProvider {
+  const apiKey = process.env.STREAM_PROVIDER_API_KEY
+  if (!apiKey || apiKey.trim().length === 0) {
+    return new UnconfiguredStreamingProvider()
+  }
+  return new LivepeerStreamingProvider(apiKey.trim())
 }

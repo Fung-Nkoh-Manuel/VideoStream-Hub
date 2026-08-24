@@ -3,17 +3,22 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
 import { Destination } from '@/lib/models/Destination'
-import { isPlatformConfigured, PlatformKey } from '@/lib/platform-connectors'
+import { isPlatformConfigured, PlatformKey, PLATFORM_CONFIG } from '@/lib/platform-connectors'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   await connectToDatabase()
-  // accessToken/refreshToken have `select: false` on the schema, so they
-  // are never included here even implicitly — the client never sees them.
+
   const destinations = await Destination.find({ userId: session.user.id }).lean()
-  return NextResponse.json({ destinations })
+
+  const configuredPlatforms: Record<string, boolean> = {}
+  for (const key of Object.keys(PLATFORM_CONFIG) as PlatformKey[]) {
+    configuredPlatforms[key] = isPlatformConfigured(key)
+  }
+
+  return NextResponse.json({ destinations, configuredPlatforms })
 }
 
 export async function POST(req: Request) {

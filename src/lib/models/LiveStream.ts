@@ -8,6 +8,9 @@ export interface IStreamDestination {
   status: StreamDestStatus
   viewerCount?: number
   errorMessage?: string
+  platformBroadcastId?: string
+  platformPostUrl?: string
+  rtmpUrl?: string
 }
 
 export interface ILiveStream extends Document {
@@ -30,7 +33,10 @@ const StreamDestinationSchema = new Schema<IStreamDestination>(
     destinationId: { type: Schema.Types.ObjectId, ref: 'Destination', required: true },
     status: { type: String, enum: ['PENDING', 'LIVE', 'STOPPED', 'ERROR'], default: 'PENDING' },
     viewerCount: Number,
-    errorMessage: String
+    errorMessage: String,
+    platformBroadcastId: String,
+    platformPostUrl: String,
+    rtmpUrl: String
   },
   { _id: false }
 )
@@ -41,7 +47,7 @@ const LiveStreamSchema = new Schema<ILiveStream>(
     title: { type: String, required: true },
     description: String,
     status: { type: String, enum: ['IDLE', 'STARTING', 'LIVE', 'STOPPING', 'ENDED', 'ERROR'], default: 'IDLE' },
-    streamKey: { type: String, required: true, unique: true, select: false },
+    streamKey: { type: String, required: true, select: false },
     rtmpIngestUrl: String,
     providerStreamId: String,
     destinations: { type: [StreamDestinationSchema], default: [] },
