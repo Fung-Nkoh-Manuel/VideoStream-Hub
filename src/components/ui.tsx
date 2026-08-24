@@ -81,8 +81,16 @@ export function ConnectionLabel({ status }: { status: ConnectionStatus }) {
   return <StatusPill status={status} label={map[status]} />
 }
 
-export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={clsx('rounded-2xl border border-slate-100 bg-white p-5 shadow-card', className)}>{children}</div>
+export function Card({
+  children,
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={clsx('rounded-2xl border border-slate-100 bg-white p-5 shadow-card', className)} {...props}>
+      {children}
+    </div>
+  )
 }
 
 export function SectionHeading({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: React.ReactNode }) {
