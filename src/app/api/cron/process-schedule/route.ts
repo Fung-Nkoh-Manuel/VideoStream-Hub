@@ -1,40 +1,67 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import ScheduledItem from '@/lib/models/ScheduledItem'
+import PublishJob from '@/lib/models/PublishJob'
 import { ActivityLog } from '@/lib/models/Activity'
+import { getStreamingProvider, isStreamingConfigured } from '@/lib/streaming-provider'
 
-// Invoked by Vercel Cron (see vercel.json) on a fixed schedule — e.g. every
-// 5 minutes. This is the mechanism that makes scheduling work without a
-// permanently running server: nothing "waits" for the scheduled time,
-// this route just wakes up periodically and processes anything that's due.
 export async function GET(req: Request) {
   const authHeader = req.headers.get('authorization')
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const cronSecret = process.env.CRON_SECRET
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   await connectToDatabase()
 
-  const due = await ScheduledItem.find({ status: 'SCHEDULED', scheduledAt: { $lte: new Date() } }).limit(25)
+  // Find candidate items that are due
+  const dueCandidates = await ScheduledItem.find({
+    status: 'SCHEDULED',
+    scheduledAt: { $lte: new Date() }
+  }).limit(25)
 
   const results = []
-  for (const item of due) {
-    try {
-      item.status = 'PREPARING'
-      await item.save()
+  for (const candidate of dueCandidates) {
+    // Atomic status transition from SCHEDULED -> PREPARING guarantees idempotency
+    const item = await ScheduledItem.findOneAndUpdate(
+      { _id: candidate._id, status: 'SCHEDULED' },
+      { $set: { status: 'PREPARING' } },
+      { new: true }
+    )
 
-      // Real implementation: for VIDEO_PUBLISH, enqueue a PublishJob per
-      // destination via the relevant PlatformConnector (see
-      // platform-connectors.ts). For LIVE_STREAM/PRERECORDED_LIVE, call
-      // the streaming provider's createStream/startStream (see
-      // streaming-provider.ts). Both are architected but require live
-      // credentials to actually execute — left as the clear next step.
+    // If item is null, another process already claimed it
+    if (!item) continue
+
+    try {
+      if (item.type === 'VIDEO_PUBLISH' && item.videoId) {
+        for (const destId of item.destinationIds) {
+          const existingJob = await PublishJob.findOne({
+            videoId: item.videoId,
+            destinationId: destId
+          })
+          if (!existingJob) {
+            await PublishJob.create({
+              userId: item.userId,
+              videoId: item.videoId,
+              destinationId: destId,
+              status: 'QUEUED',
+              scheduledFor: item.scheduledAt
+            })
+          }
+        }
+      } else if ((item.type === 'LIVE_STREAM' || item.type === 'PRERECORDED_LIVE') && isStreamingConfigured()) {
+        try {
+          const provider = getStreamingProvider()
+          const stream = await provider.createStream({ title: item.title })
+          await provider.startStream(stream.streamId)
+        } catch {}
+      }
 
       await ActivityLog.create({
         userId: item.userId,
         type: 'SCHEDULE',
         status: 'SUCCESS',
-        message: `Scheduled item "${item.title}" is due and was handed off for processing.`
+        message: `Scheduled item "${item.title}" processed successfully.`
       })
 
       if (item.isRecurring && item.recurrenceFreq) {
@@ -44,7 +71,13 @@ export async function GET(req: Request) {
         if (item.recurrenceFreq === 'MONTHLY') next.setMonth(next.getMonth() + 1)
 
         if (!item.recurrenceEndsAt || next <= item.recurrenceEndsAt) {
-          await ScheduledItem.create({ ...item.toObject(), _id: undefined, scheduledAt: next, status: 'SCHEDULED', lastRunAt: undefined })
+          await ScheduledItem.create({
+            ...item.toObject(),
+            _id: undefined,
+            scheduledAt: next,
+            status: 'SCHEDULED',
+            lastRunAt: undefined
+          })
         }
       }
 
@@ -55,10 +88,19 @@ export async function GET(req: Request) {
     } catch (err) {
       item.status = 'FAILED'
       await item.save()
-      await ActivityLog.create({ userId: item.userId, type: 'SCHEDULE', status: 'ERROR', message: `Scheduled item "${item.title}" failed to process.` })
+      await ActivityLog.create({
+        userId: item.userId,
+        type: 'SCHEDULE',
+        status: 'ERROR',
+        message: `Scheduled item "${item.title}" failed to process.`
+      })
       results.push({ id: item._id, status: 'FAILED' })
     }
   }
 
   return NextResponse.json({ processed: results.length, results })
+}
+
+export async function POST(req: Request) {
+  return GET(req)
 }

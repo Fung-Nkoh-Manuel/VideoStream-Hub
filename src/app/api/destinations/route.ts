@@ -16,10 +16,6 @@ export async function GET() {
   return NextResponse.json({ destinations })
 }
 
-// POST /api/destinations — starts a connection. If the platform has no API
-// credentials configured yet, the destination is created in
-// SETUP_REQUIRED state rather than silently pretending to connect (see
-// platform-connectors.ts / .env.example for the required variables).
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -30,14 +26,39 @@ export async function POST(req: Request) {
   await connectToDatabase()
   const configured = isPlatformConfigured(platform)
 
-  const destination = await Destination.create({
-    userId: session.user.id,
-    platform,
-    accountName: '',
-    status: configured ? 'CONNECTING' : 'SETUP_REQUIRED'
-  })
+  let destination = await Destination.findOne({ userId: session.user.id, platform })
+  if (!destination) {
+    destination = await Destination.create({
+      userId: session.user.id,
+      platform,
+      accountName: '',
+      status: configured ? 'CONNECTING' : 'SETUP_REQUIRED'
+    })
+  } else {
+    destination.status = configured ? 'CONNECTING' : 'SETUP_REQUIRED'
+    await destination.save()
+  }
 
-  // When configured, the client should redirect to
-  // /api/destinations/[platform]/authorize to begin the real OAuth flow.
   return NextResponse.json({ destination, nextStep: configured ? `/api/destinations/${platform.toLowerCase()}/authorize` : null })
+}
+
+export async function DELETE(req: Request) {
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { searchParams } = new URL(req.url)
+  const id = searchParams.get('id')
+  const platform = searchParams.get('platform')
+
+  await connectToDatabase()
+
+  if (id) {
+    await Destination.deleteOne({ _id: id, userId: session.user.id })
+  } else if (platform) {
+    await Destination.deleteOne({ platform: platform.toUpperCase(), userId: session.user.id })
+  } else {
+    return NextResponse.json({ error: 'Destination ID or platform required' }, { status: 400 })
+  }
+
+  return NextResponse.json({ success: true })
 }

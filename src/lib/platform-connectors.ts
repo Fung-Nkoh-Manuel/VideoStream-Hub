@@ -1,8 +1,6 @@
 // Per-platform connector abstraction. Each platform implements the same
 // shape so Destinations, Publishing, and Live Studio don't need to know
-// platform-specific details. Add a new platform by adding one entry here —
-// no other part of the app needs to change (see PLATFORM_CONFIG below,
-// consumed by the Destinations page and the schema's Platform enum).
+// platform-specific details.
 
 export type PlatformKey = 'YOUTUBE' | 'TIKTOK' | 'FACEBOOK' | 'TWITCH' | 'LINKEDIN' | 'X' | 'CUSTOM_RTMP'
 
@@ -84,7 +82,8 @@ export const PLATFORM_CONFIG: Record<PlatformKey, PlatformConfig> = {
 
 export function isPlatformConfigured(key: PlatformKey): boolean {
   const cfg = PLATFORM_CONFIG[key]
-  if (cfg.requiredEnv.length === 0) return true // e.g. custom RTMP needs no app credentials
+  if (!cfg) return false
+  if (cfg.requiredEnv.length === 0) return true
   return cfg.requiredEnv.every((name) => Boolean(process.env[name]))
 }
 
@@ -111,23 +110,196 @@ export interface PlatformConnector {
 
 export class PlatformNotConfiguredError extends Error {
   constructor(public platform: PlatformKey) {
-    super(`${PLATFORM_CONFIG[platform].label} is not configured. Add API credentials to .env to enable this connection.`)
+    super(`${PLATFORM_CONFIG[platform]?.label || platform} is not configured. Add API credentials to .env to enable this connection.`)
   }
 }
 
-/**
- * Returns a connector for the given platform, or throws
- * PlatformNotConfiguredError if the required credentials aren't set.
- * Concrete connectors (YouTubeConnector, TikTokConnector, ...) should be
- * implemented against each platform's official API once credentials and
- * app review are in place — this factory is the single place that wires
- * them in, so no other code needs to change when one is added.
- */
+class YouTubeConnector implements PlatformConnector {
+  platform: PlatformKey = 'YOUTUBE'
+
+  private getRedirectUri(): string {
+    return process.env.YOUTUBE_REDIRECT_URI || 'http://localhost:3000/api/destinations/youtube/callback'
+  }
+
+  getAuthorizeUrl(state: string): string {
+    const clientId = process.env.YOUTUBE_CLIENT_ID
+    const redirectUri = this.getRedirectUri()
+    const scope = encodeURIComponent('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly')
+    return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=${encodeURIComponent(state)}`
+  }
+
+  async exchangeCodeForTokens(code: string): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: Date; accountName: string; externalAccountId: string }> {
+    const clientId = process.env.YOUTUBE_CLIENT_ID
+    const clientSecret = process.env.YOUTUBE_CLIENT_SECRET
+    const redirectUri = this.getRedirectUri()
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId || '',
+        client_secret: clientSecret || '',
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri
+      })
+    })
+
+    if (!tokenRes.ok) {
+      const err = await tokenRes.text()
+      throw new Error(`YouTube token exchange failed: ${err}`)
+    }
+
+    const tokenData = await tokenRes.json()
+    const accessToken = tokenData.access_token
+    const refreshToken = tokenData.refresh_token
+    const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : undefined
+
+    let accountName = 'YouTube Channel'
+    let externalAccountId = ''
+
+    try {
+      const channelRes = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+      if (channelRes.ok) {
+        const channelData = await channelRes.json()
+        if (channelData.items?.[0]) {
+          accountName = channelData.items[0].snippet?.title || 'YouTube Channel'
+          externalAccountId = channelData.items[0].id || ''
+        }
+      }
+    } catch {}
+
+    return { accessToken, refreshToken, expiresAt, accountName, externalAccountId }
+  }
+
+  async publish(accessToken: string, input: PublishInput): Promise<PublishResult> {
+    const res = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        snippet: {
+          title: input.title,
+          description: input.description || '',
+          tags: input.tags || []
+        },
+        status: {
+          privacyStatus: input.visibility.toLowerCase()
+        }
+      })
+    })
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`YouTube publish failed: ${err}`)
+    }
+    const data = await res.json()
+    return {
+      platformPostId: data.id,
+      platformPostUrl: `https://www.youtube.com/watch?v=${data.id}`
+    }
+  }
+}
+
+class TikTokConnector implements PlatformConnector {
+  platform: PlatformKey = 'TIKTOK'
+
+  private getRedirectUri(): string {
+    return process.env.TIKTOK_REDIRECT_URI || 'http://localhost:3000/api/destinations/tiktok/callback'
+  }
+
+  getAuthorizeUrl(state: string): string {
+    const clientKey = process.env.TIKTOK_CLIENT_KEY
+    const redirectUri = this.getRedirectUri()
+    const scope = encodeURIComponent('user.info.basic,video.publish,video.upload')
+    return `https://www.tiktok.com/v2/auth/authorize/?client_key=${clientKey}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&state=${encodeURIComponent(state)}`
+  }
+
+  async exchangeCodeForTokens(code: string): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: Date; accountName: string; externalAccountId: string }> {
+    const clientKey = process.env.TIKTOK_CLIENT_KEY
+    const clientSecret = process.env.TIKTOK_CLIENT_SECRET
+    const redirectUri = this.getRedirectUri()
+
+    const params = new URLSearchParams()
+    params.append('client_key', clientKey || '')
+    params.append('client_secret', clientSecret || '')
+    params.append('code', code)
+    params.append('grant_type', 'authorization_code')
+    params.append('redirect_uri', redirectUri)
+
+    const tokenRes = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params
+    })
+
+    const tokenData = await tokenRes.json()
+    if (tokenData.error || !tokenData.access_token) {
+      throw new Error(`TikTok token exchange failed: ${tokenData.error_description || tokenData.error || 'Unknown error'}`)
+    }
+
+    const accessToken = tokenData.access_token
+    const refreshToken = tokenData.refresh_token
+    const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : undefined
+    const openId = tokenData.open_id || ''
+
+    let accountName = 'TikTok Account'
+    let externalAccountId = openId
+
+    try {
+      const userRes = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,display_name', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+      if (userRes.ok) {
+        const userData = await userRes.json()
+        if (userData.data?.user) {
+          accountName = userData.data.user.display_name || 'TikTok Account'
+          if (userData.data.user.open_id) externalAccountId = userData.data.user.open_id
+        }
+      }
+    } catch {}
+
+    return { accessToken, refreshToken, expiresAt, accountName, externalAccountId }
+  }
+
+  async publish(accessToken: string, input: PublishInput): Promise<PublishResult> {
+    const initRes = await fetch('https://open.tiktokapis.com/v2/post/publish/video/init/', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        post_info: {
+          title: input.title,
+          privacy_level: input.visibility === 'PUBLIC' ? 'PUBLIC_TO_EVERYONE' : 'SELF_ONLY'
+        },
+        source_info: {
+          source: 'PULL_FROM_URL',
+          video_url: input.videoAssetUrl
+        }
+      })
+    })
+
+    const initData = await initRes.json()
+    if (initData.error?.code) {
+      throw new Error(`TikTok publish error: ${initData.error.message || initData.error.code}`)
+    }
+
+    const publishId = initData.data?.publish_id || ''
+    return {
+      platformPostId: publishId,
+      platformPostUrl: 'https://www.tiktok.com/'
+    }
+  }
+}
+
 export function getConnector(platform: PlatformKey): PlatformConnector {
   if (!isPlatformConfigured(platform)) {
     throw new PlatformNotConfiguredError(platform)
   }
+
+  if (platform === 'YOUTUBE') return new YouTubeConnector()
+  if (platform === 'TIKTOK') return new TikTokConnector()
+
   throw new Error(
-    `Connector for ${platform} is credentialed but not yet implemented. Implement PlatformConnector in src/lib/platform-connectors.ts once you're ready to go live with this platform's API.`
+    `Connector for ${platform} is configured but not fully supported for direct publishing yet.`
   )
 }
