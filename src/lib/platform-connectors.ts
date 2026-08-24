@@ -118,19 +118,20 @@ class YouTubeConnector implements PlatformConnector {
   platform: PlatformKey = 'YOUTUBE'
 
   private getRedirectUri(): string {
-    return process.env.YOUTUBE_REDIRECT_URI || 'http://localhost:3000/api/destinations/youtube/callback'
+    const raw = process.env.YOUTUBE_REDIRECT_URI?.replace(/^["']|["']$/g, '').trim()
+    return raw || 'http://localhost:3000/api/destinations/youtube/callback'
   }
 
   getAuthorizeUrl(state: string): string {
-    const clientId = process.env.YOUTUBE_CLIENT_ID
+    const clientId = process.env.YOUTUBE_CLIENT_ID?.replace(/^["']|["']$/g, '').trim()
     const redirectUri = this.getRedirectUri()
     const scope = encodeURIComponent('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly')
     return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=${encodeURIComponent(state)}`
   }
 
   async exchangeCodeForTokens(code: string): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: Date; accountName: string; externalAccountId: string }> {
-    const clientId = process.env.YOUTUBE_CLIENT_ID
-    const clientSecret = process.env.YOUTUBE_CLIENT_SECRET
+    const clientId = process.env.YOUTUBE_CLIENT_ID?.replace(/^["']|["']$/g, '').trim()
+    const clientSecret = process.env.YOUTUBE_CLIENT_SECRET?.replace(/^["']|["']$/g, '').trim()
     const redirectUri = this.getRedirectUri()
 
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -205,19 +206,20 @@ class TikTokConnector implements PlatformConnector {
   platform: PlatformKey = 'TIKTOK'
 
   private getRedirectUri(): string {
-    return process.env.TIKTOK_REDIRECT_URI || 'http://localhost:3000/api/destinations/tiktok/callback'
+    const raw = process.env.TIKTOK_REDIRECT_URI?.replace(/^["']|["']$/g, '').trim()
+    return raw || 'http://localhost:3000/api/destinations/tiktok/callback'
   }
 
   getAuthorizeUrl(state: string): string {
-    const clientKey = process.env.TIKTOK_CLIENT_KEY
+    const clientKey = process.env.TIKTOK_CLIENT_KEY?.replace(/^["']|["']$/g, '').trim()
     const redirectUri = this.getRedirectUri()
     const scope = encodeURIComponent('user.info.basic,video.publish,video.upload')
     return `https://www.tiktok.com/v2/auth/authorize/?client_key=${clientKey}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&state=${encodeURIComponent(state)}`
   }
 
   async exchangeCodeForTokens(code: string): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: Date; accountName: string; externalAccountId: string }> {
-    const clientKey = process.env.TIKTOK_CLIENT_KEY
-    const clientSecret = process.env.TIKTOK_CLIENT_SECRET
+    const clientKey = process.env.TIKTOK_CLIENT_KEY?.replace(/^["']|["']$/g, '').trim()
+    const clientSecret = process.env.TIKTOK_CLIENT_SECRET?.replace(/^["']|["']$/g, '').trim()
     const redirectUri = this.getRedirectUri()
 
     const params = new URLSearchParams()

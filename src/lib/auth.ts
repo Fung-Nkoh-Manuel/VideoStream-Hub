@@ -14,11 +14,14 @@ import User from './models/User'
 
 const providers = []
 
-if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+const googleClientId = process.env.GOOGLE_CLIENT_ID?.replace(/^["']|["']$/g, '').trim()
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.replace(/^["']|["']$/g, '').trim()
+
+if (googleClientId && googleClientSecret) {
   providers.push(
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET
+      clientId: googleClientId,
+      clientSecret: googleClientSecret
     })
   )
 }
