@@ -15,6 +15,11 @@ const ALL_PLATFORMS: PlatformKey[] = ['YOUTUBE', 'TIKTOK', 'FACEBOOK', 'TWITCH',
 export default function DestinationsPage() {
   const [dbDestinations, setDbDestinations] = useState<DestinationItem[]>([])
   const [loading, setLoading] = useState(true)
+  // Prevent hydration mismatch: isPlatformConfigured reads process.env which
+  // differs between the SSR pass (env vars present) and the client hydration
+  // pass (env vars absent). We defer all env-dependent rendering until after
+  // the component has mounted on the client.
+  const [mounted, setMounted] = useState(false)
 
   const loadDestinations = async () => {
     try {
@@ -29,6 +34,7 @@ export default function DestinationsPage() {
   }
 
   useEffect(() => {
+    setMounted(true)
     loadDestinations()
   }, [])
 
@@ -85,6 +91,19 @@ export default function DestinationsPage() {
       </div>
 
       <SectionHeading title="Platforms" />
+      {!mounted ? (
+        // Identical on server and client — prevents hydration mismatch from
+        // isPlatformConfigured() reading process.env differently in each pass.
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {ALL_PLATFORMS.map((p) => (
+            <Card key={p} className="animate-pulse !p-5">
+              <div className="h-5 w-3/4 rounded-lg bg-slate-100" />
+              <div className="mt-2 h-3 w-1/2 rounded-lg bg-slate-100" />
+              <div className="mt-4 h-8 w-full rounded-xl bg-slate-100" />
+            </Card>
+          ))}
+        </div>
+      ) : (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {platformCards.map((d) => {
           const meta = PLATFORM_META[d.platform]
@@ -116,6 +135,7 @@ export default function DestinationsPage() {
           )
         })}
       </div>
+      )}
 
       <div className="mt-10">
         <SectionHeading
