@@ -1,15 +1,25 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import { signIn } from 'next-auth/react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import Logo from '@/components/Logo'
 import { Button } from '@/components/ui'
 
-export default function LoginPage() {
+function LoginContent() {
+  const searchParams = useSearchParams()
+  const urlError = searchParams.get('error')
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(
+    urlError === 'OAuthAccountNotLinked'
+      ? 'An account with this email already exists using password login. Please sign in with email/password.'
+      : urlError
+      ? `Authentication error: ${urlError}`
+      : null
+  )
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
@@ -63,7 +73,7 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               className="focus-ring w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm"
             />
-            {error && <p className="text-sm text-live">{error}</p>}
+            {error && <p className="text-sm text-red-500 font-medium">{error}</p>}
             <Button type="submit" disabled={loading} className="w-full">
               {loading ? 'Signing in…' : 'Sign in'}
             </Button>
@@ -75,6 +85,14 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-slate-50">Loading...</div>}>
+      <LoginContent />
+    </Suspense>
   )
 }
 

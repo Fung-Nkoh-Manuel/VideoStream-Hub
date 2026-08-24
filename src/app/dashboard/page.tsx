@@ -1,14 +1,61 @@
+'use client'
+
+import { useEffect, useState } from 'react'
 import AppShell from '@/components/AppShell'
-import { Card, SectionHeading, StatusPill, PlatformChip, ProgressBar, Button } from '@/components/ui'
-import { mockVideos, mockDashboard, mockActivity, mockSchedule, mockDestinations } from '@/lib/mock-data'
+import { Card, SectionHeading, StatusPill, PlatformChip, ProgressBar } from '@/components/ui'
 import { formatBytes, formatDuration, formatRelativeTime, formatDateTime } from '@/lib/utils'
 import Link from 'next/link'
 import { UploadCloud, Radio, CalendarPlus, Share2, Film, HardDrive, Users, Clock } from 'lucide-react'
 
+interface DashboardData {
+  metrics: {
+    connectedCount: number
+    totalPlatforms: number
+    totalVideos: number
+    upcomingScheduledCount: number
+    activeLiveStream: { title: string } | null
+    storageUsedBytes: number
+    storageLimitBytes: number
+  }
+  recentVideos: Array<{ id: string; title: string; durationSeconds: number; uploadedAt: string; sizeBytes: number; status: any }>
+  recentActivity: Array<{ id: string; message: string; status: any; platform?: any; createdAt: string }>
+  upcoming: Array<{ id: string; title: string; scheduledAt: string; platforms: any[] }>
+  destinations: Array<{ id: string; platform: any; status: string }>
+}
+
 export default function DashboardPage() {
-  const connected = mockDestinations.filter((d) => d.status === 'CONNECTED')
-  const upcoming = mockSchedule.filter((s) => s.status === 'SCHEDULED').slice(0, 3)
-  const recentVideos = mockVideos.slice(0, 4)
+  const [data, setData] = useState<DashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function loadDashboard() {
+      try {
+        const res = await fetch('/api/dashboard')
+        if (res.ok) {
+          const json = await res.json()
+          setData(json)
+        }
+      } catch {} finally {
+        setLoading(false)
+      }
+    }
+    loadDashboard()
+  }, [])
+
+  const metrics = data?.metrics || {
+    connectedCount: 0,
+    totalPlatforms: 7,
+    totalVideos: 0,
+    upcomingScheduledCount: 0,
+    activeLiveStream: null,
+    storageUsedBytes: 0,
+    storageLimitBytes: 5 * 1024 * 1024 * 1024
+  }
+
+  const recentVideos = data?.recentVideos || []
+  const recentActivity = data?.recentActivity || []
+  const upcoming = data?.upcoming || []
+  const destinations = data?.destinations || []
 
   return (
     <AppShell>
@@ -29,43 +76,55 @@ export default function DashboardPage() {
 
       {/* Stat cards */}
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard Icon={Share2} label="Connected platforms" value={`${connected.length} / ${mockDestinations.length}`} />
-        <StatCard Icon={Film} label="Total videos" value={String(mockDashboard.totalVideos)} />
-        <StatCard Icon={Clock} label="Upcoming scheduled" value={String(mockSchedule.filter((s) => s.status === 'SCHEDULED').length)} />
-        <StatCard Icon={Users} label="Active live stream" value={mockDashboard.activeLiveStream ? 'Live now' : 'None'} accent={mockDashboard.activeLiveStream ? 'text-live' : undefined} />
+        <StatCard Icon={Share2} label="Connected platforms" value={`${metrics.connectedCount} / ${metrics.totalPlatforms}`} />
+        <StatCard Icon={Film} label="Total videos" value={String(metrics.totalVideos)} />
+        <StatCard Icon={Clock} label="Upcoming scheduled" value={String(metrics.upcomingScheduledCount)} />
+        <StatCard Icon={Users} label="Active live stream" value={metrics.activeLiveStream ? 'Live now' : 'None'} accent={metrics.activeLiveStream ? 'text-live' : undefined} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card>
             <SectionHeading title="Recent videos" action={<Link href="/videos" className="text-sm font-semibold text-teal-600 hover:underline">View all</Link>} />
-            <div className="space-y-3">
-              {recentVideos.map((v) => (
-                <div key={v.id} className="flex items-center gap-3 rounded-xl border border-slate-100 p-2.5">
-                  <div className="flex h-12 w-20 flex-shrink-0 items-center justify-center rounded-lg bg-ink-800 text-[10px] font-semibold text-white">{formatDuration(v.durationSeconds)}</div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-ink-800">{v.title}</p>
-                    <p className="text-xs text-slate-400">{formatRelativeTime(v.uploadedAt)} · {formatBytes(v.sizeBytes)}</p>
+            {loading ? (
+              <p className="text-xs text-slate-400 py-4 text-center">Loading videos...</p>
+            ) : recentVideos.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 text-center">No videos uploaded yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {recentVideos.map((v) => (
+                  <div key={v.id} className="flex items-center gap-3 rounded-xl border border-slate-100 p-2.5">
+                    <div className="flex h-12 w-20 flex-shrink-0 items-center justify-center rounded-lg bg-ink-800 text-[10px] font-semibold text-white">{formatDuration(v.durationSeconds)}</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-ink-800">{v.title}</p>
+                      <p className="text-xs text-slate-400">{formatRelativeTime(v.uploadedAt)} · {formatBytes(v.sizeBytes)}</p>
+                    </div>
+                    <StatusPill status={v.status} />
                   </div>
-                  <StatusPill status={v.status} />
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </Card>
 
           <Card>
             <SectionHeading title="Recent activity" action={<Link href="/activity" className="text-sm font-semibold text-teal-600 hover:underline">View all</Link>} />
-            <div className="space-y-3">
-              {mockActivity.slice(0, 5).map((a) => (
-                <div key={a.id} className="flex items-start gap-3">
-                  <StatusPill status={a.status} label="" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-ink-800">{a.message}</p>
-                    <p className="text-xs text-slate-400">{formatRelativeTime(a.createdAt)}</p>
+            {loading ? (
+              <p className="text-xs text-slate-400 py-4 text-center">Loading activity...</p>
+            ) : recentActivity.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 text-center">No activity recorded yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {recentActivity.map((a) => (
+                  <div key={a.id} className="flex items-start gap-3">
+                    <StatusPill status={a.status} label="" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-ink-800">{a.message}</p>
+                      <p className="text-xs text-slate-400">{formatRelativeTime(a.createdAt)}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
 
@@ -74,9 +133,9 @@ export default function DashboardPage() {
             <SectionHeading title="Storage" />
             <div className="mb-2 flex items-center justify-between text-sm">
               <span className="flex items-center gap-1.5 text-slate-500"><HardDrive size={14} /> Used</span>
-              <span className="font-semibold text-ink-800">{formatBytes(mockDashboard.storageUsedBytes)} / {formatBytes(mockDashboard.storageLimitBytes)}</span>
+              <span className="font-semibold text-ink-800">{formatBytes(metrics.storageUsedBytes)} / {formatBytes(metrics.storageLimitBytes)}</span>
             </div>
-            <ProgressBar value={mockDashboard.storageUsedBytes} max={mockDashboard.storageLimitBytes} tone="teal" />
+            <ProgressBar value={metrics.storageUsedBytes} max={metrics.storageLimitBytes} tone="teal" />
           </Card>
 
           <Card>
@@ -101,7 +160,7 @@ export default function DashboardPage() {
           <Card>
             <SectionHeading title="Connected platforms" action={<Link href="/destinations" className="text-sm font-semibold text-teal-600 hover:underline">Manage</Link>} />
             <div className="flex flex-wrap gap-2">
-              {mockDestinations.map((d) => (
+              {destinations.map((d) => (
                 <PlatformChip key={d.id} platform={d.platform} />
               ))}
             </div>

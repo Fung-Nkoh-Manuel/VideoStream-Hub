@@ -1,12 +1,39 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import AppShell from '@/components/AppShell'
 import { Card, StatusPill, PlatformChip, Button, EmptyState } from '@/components/ui'
-import { mockVideos } from '@/lib/mock-data'
 import { formatBytes, formatDuration, formatRelativeTime } from '@/lib/utils'
-import { Search, MoreVertical, Play, Pencil, Send, CalendarClock, Copy, Trash2, History } from 'lucide-react'
+import { Search, MoreVertical, Play, Pencil, Send, CalendarClock, Copy, Trash2, History, AlertCircle, CheckCircle2, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
+
+interface PublishJobUI {
+  id: string
+  status: string
+  platform: string
+  platformPostId?: string
+  platformPostUrl?: string
+  errorMessage?: string
+  publishedAt?: string | null
+  createdAt: string
+}
+
+interface VideoItem {
+  id: string
+  _id?: string
+  title: string
+  description?: string
+  thumbnailUrl: string
+  durationSeconds: number
+  uploadedAt: string
+  status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED'
+  publishStatus: 'DRAFT' | 'SCHEDULED' | 'PUBLISHED' | 'PARTIALLY_PUBLISHED' | 'FAILED'
+  platforms: any[]
+  visibility: 'PRIVATE' | 'UNLISTED' | 'PUBLIC'
+  sizeBytes: number
+  originalFileUrl?: string
+  publishJobs?: PublishJobUI[]
+}
 
 const FILTERS = [
   { key: 'ALL', label: 'All' },
@@ -18,12 +45,71 @@ const FILTERS = [
 ] as const
 
 export default function VideosPage() {
+  const [videos, setVideos] = useState<VideoItem[]>([])
+  const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['key']>('ALL')
   const [openMenu, setOpenMenu] = useState<string | null>(null)
 
+  const [publishingId, setPublishingId] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string; url?: string } | null>(null)
+  const [selectedHistoryVideo, setSelectedHistoryVideo] = useState<VideoItem | null>(null)
+
+  const loadVideos = async () => {
+    try {
+      const res = await fetch('/api/videos')
+      if (res.ok) {
+        const data = await res.json()
+        setVideos(data.videos || [])
+      }
+    } catch {} finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadVideos()
+  }, [])
+
+  const handlePublishToYouTube = async (video: VideoItem) => {
+    setOpenMenu(null)
+    setPublishingId(video.id)
+    setFeedback(null)
+
+    try {
+      const res = await fetch('/api/videos/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId: video.id })
+      })
+
+      const data = await res.json()
+
+      if (!res.ok || data.error) {
+        setFeedback({
+          type: 'error',
+          message: data.error || 'Failed to publish to YouTube.'
+        })
+      } else {
+        setFeedback({
+          type: 'success',
+          message: `Successfully published "${video.title}" to YouTube!`,
+          url: data.publishJob?.platformPostUrl
+        })
+        await loadVideos()
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err.message || 'An unexpected error occurred while publishing.'
+      })
+    } finally {
+      setPublishingId(null)
+    }
+  }
+
   const filtered = useMemo(() => {
-    return mockVideos.filter((v) => {
+    return videos.filter((v) => {
       const matchesQuery = v.title.toLowerCase().includes(query.toLowerCase())
       const matchesFilter =
         filter === 'ALL' ||
@@ -32,17 +118,31 @@ export default function VideosPage() {
         (filter !== 'PROCESSING' && filter !== 'FAILED' && v.publishStatus === filter)
       return matchesQuery && matchesFilter
     })
-  }, [query, filter])
+  }, [videos, query, filter])
 
   return (
     <AppShell>
       <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-bold text-ink-800">My Videos</h1>
-          <p className="mt-1 text-sm text-slate-500">{mockVideos.length} videos in your library</p>
+          <p className="mt-1 text-sm text-slate-500">{videos.length} videos in your library</p>
         </div>
         <Link href="/upload"><Button>Upload video</Button></Link>
       </div>
+
+      {feedback && (
+        <Card className={`mb-6 flex items-center justify-between gap-3 ${feedback.type === 'success' ? '!border-emerald-200 !bg-emerald-50 text-emerald-800' : '!border-red-200 !bg-red-50 text-red-800'}`}>
+          <div className="flex items-center gap-2 text-sm font-medium">
+            {feedback.type === 'success' ? <CheckCircle2 size={18} className="text-emerald-600" /> : <AlertCircle size={18} className="text-red-600" />}
+            <span>{feedback.message}</span>
+          </div>
+          {feedback.url && (
+            <a href={feedback.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline">
+              View on YouTube <ExternalLink size={12} />
+            </a>
+          )}
+        </Card>
+      )}
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative w-full sm:max-w-xs">
@@ -67,7 +167,9 @@ export default function VideosPage() {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="py-12 text-center text-sm text-slate-500">Loading videos...</div>
+      ) : filtered.length === 0 ? (
         <EmptyState title="No videos found" body="Try a different search or filter, or upload your first video to get started." action={<Link href="/upload"><Button>Upload video</Button></Link>} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -85,19 +187,13 @@ export default function VideosPage() {
                   <MoreVertical size={14} />
                 </button>
                 {openMenu === v.id && (
-                  <div className="absolute right-2 top-9 z-10 w-44 rounded-xl border border-slate-100 bg-white py-1.5 text-left shadow-card">
-                    {[
-                      { Icon: Pencil, label: 'Edit details' },
-                      { Icon: Send, label: 'Publish' },
-                      { Icon: CalendarClock, label: 'Schedule' },
-                      { Icon: Copy, label: 'Duplicate' },
-                      { Icon: History, label: 'View history' },
-                      { Icon: Trash2, label: 'Delete' }
-                    ].map(({ Icon, label }) => (
-                      <button key={label} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-ink-700 hover:bg-slate-50">
-                        <Icon size={13} /> {label}
-                      </button>
-                    ))}
+                  <div className="absolute right-2 top-9 z-10 w-48 rounded-xl border border-slate-100 bg-white py-1.5 text-left shadow-card">
+                    <button onClick={() => handlePublishToYouTube(v)} disabled={publishingId === v.id} className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-ink-700 hover:bg-slate-50">
+                      <Send size={13} className="text-teal-600" /> {publishingId === v.id ? 'Publishing to YouTube...' : 'Publish to YouTube'}
+                    </button>
+                    <button onClick={() => { setOpenMenu(null); setSelectedHistoryVideo(v) }} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-ink-700 hover:bg-slate-50">
+                      <History size={13} /> View history
+                    </button>
                   </div>
                 )}
               </div>
@@ -113,6 +209,40 @@ export default function VideosPage() {
               </div>
             </Card>
           ))}
+        </div>
+      )}
+
+      {selectedHistoryVideo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
+            <h2 className="text-base font-semibold text-ink-800">Publishing History</h2>
+            <p className="text-xs text-slate-500 mt-0.5">{selectedHistoryVideo.title}</p>
+
+            <div className="mt-4 space-y-3 max-h-60 overflow-y-auto">
+              {!selectedHistoryVideo.publishJobs || selectedHistoryVideo.publishJobs.length === 0 ? (
+                <p className="text-xs text-slate-400">No publishing history recorded yet.</p>
+              ) : (
+                selectedHistoryVideo.publishJobs.map((j) => (
+                  <div key={j.id} className="rounded-xl border border-slate-100 p-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <PlatformChip platform={j.platform as any} />
+                      <StatusPill status={j.status as any} />
+                    </div>
+                    {j.platformPostUrl && (
+                      <a href={j.platformPostUrl} target="_blank" rel="noopener noreferrer" className="mt-2 flex items-center gap-1 font-medium text-teal-600 hover:underline">
+                        View Post <ExternalLink size={11} />
+                      </a>
+                    )}
+                    {j.errorMessage && <p className="mt-2 text-red-500">{j.errorMessage}</p>}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <Button size="sm" variant="outline" onClick={() => setSelectedHistoryVideo(null)}>Close</Button>
+            </div>
+          </div>
         </div>
       )}
     </AppShell>

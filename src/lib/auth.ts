@@ -7,21 +7,17 @@ import clientPromise from './mongodb-client'
 import { connectToDatabase } from './mongodb'
 import User from './models/User'
 
-// NOTE: "Sign in with Google" here authenticates the user INTO VideoStream
-// Hub only. It is intentionally separate from "Connect YouTube" under
-// Destinations, which is a per-platform OAuth grant stored on the
-// Destination model (see src/lib/platform-connectors.ts). Do not merge them.
-
-const providers = []
-
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.replace(/^["']|["']$/g, '').trim()
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.replace(/^["']|["']$/g, '').trim()
+
+const providers = []
 
 if (googleClientId && googleClientSecret) {
   providers.push(
     GoogleProvider({
       clientId: googleClientId,
-      clientSecret: googleClientSecret
+      clientSecret: googleClientSecret,
+      allowDangerousEmailAccountLinking: true
     })
   )
 }
@@ -49,9 +45,6 @@ providers.push(
 )
 
 export const authOptions: NextAuthOptions = {
-  // The Mongo adapter backs Google-provider accounts/sessions. Credentials
-  // sign-in uses JWT sessions below and doesn't touch the adapter's
-  // account/session collections, so both can coexist safely.
   adapter: MongoDBAdapter(clientPromise),
   session: { strategy: 'jwt' },
   pages: {
@@ -61,12 +54,15 @@ export const authOptions: NextAuthOptions = {
   providers,
   callbacks: {
     async jwt({ token, user }) {
-      if (user) token.sub = user.id
+      if (user) {
+        token.id = user.id
+        token.sub = user.id
+      }
       return token
     },
     async session({ session, token }) {
-      if (session.user && token.sub) {
-        ;(session.user as { id?: string }).id = token.sub
+      if (session.user && token) {
+        ;(session.user as { id?: string }).id = (token.id as string) || token.sub
       }
       return session
     }

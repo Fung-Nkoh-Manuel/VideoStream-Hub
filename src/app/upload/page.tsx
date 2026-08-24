@@ -1,11 +1,11 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import AppShell from '@/components/AppShell'
 import { Card, Button, PlatformChip, ProgressBar } from '@/components/ui'
-import { mockDestinations } from '@/lib/mock-data'
 import { formatBytes } from '@/lib/utils'
 import { UploadCloud, Sparkles, FileVideo, X, AlertTriangle } from 'lucide-react'
+import { DestinationItem } from '@/lib/types'
 
 type Stage = 'idle' | 'uploading' | 'processing' | 'ready' | 'failed'
 
@@ -18,19 +18,27 @@ export default function UploadPage() {
   const [description, setDescription] = useState('')
   const [tags, setTags] = useState('')
   const [selectedDestinations, setSelectedDestinations] = useState<string[]>([])
+  const [connectedDestinations, setConnectedDestinations] = useState<DestinationItem[]>([])
   const [mode, setMode] = useState<'now' | 'schedule'>('now')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [generatingAI, setGeneratingAI] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const uploadResultRef = useRef<{ publicId: string; secureUrl: string; durationSeconds?: number } | null>(null)
 
-  const connectedDestinations = mockDestinations.filter((d) => d.status === 'CONNECTED')
+  useEffect(() => {
+    async function loadDestinations() {
+      try {
+        const res = await fetch('/api/destinations')
+        if (res.ok) {
+          const data = await res.json()
+          const connected = (data.destinations || []).filter((d: any) => d.status === 'CONNECTED')
+          setConnectedDestinations(connected)
+        }
+      } catch {}
+    }
+    loadDestinations()
+  }, [])
 
-  // Real direct-to-Cloudinary upload: fetch a signature from our server,
-  // then upload the file straight to Cloudinary from the browser with
-  // genuine XHR progress events. The video's bytes never pass through a
-  // Vercel serverless function. Falls back to a clear error state (never
-  // a fake progress bar) if Cloudinary isn't configured yet.
   const startUpload = useCallback(async (f: File) => {
     setFile(f)
     setTitle(f.name.replace(/\.[^/.]+$/, ''))
@@ -70,7 +78,6 @@ export default function UploadPage() {
       uploadResultRef.current = { publicId: result.public_id, secureUrl: result.secure_url, durationSeconds: result.duration }
       setStage('processing')
 
-      // Register the video record now that the file lives in Cloudinary.
       const createRes = await fetch('/api/videos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

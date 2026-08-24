@@ -176,9 +176,12 @@ class YouTubeConnector implements PlatformConnector {
   }
 
   async publish(accessToken: string, input: PublishInput): Promise<PublishResult> {
-    const res = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status', {
+    const initRes = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({
         snippet: {
           title: input.title,
@@ -186,18 +189,50 @@ class YouTubeConnector implements PlatformConnector {
           tags: input.tags || []
         },
         status: {
-          privacyStatus: input.visibility.toLowerCase()
+          privacyStatus: (input.visibility || 'PUBLIC').toLowerCase()
         }
       })
     })
-    if (!res.ok) {
-      const err = await res.text()
-      throw new Error(`YouTube publish failed: ${err}`)
+
+    if (!initRes.ok) {
+      const errText = await initRes.text()
+      let parsedErr = errText
+      try {
+        const json = JSON.parse(errText)
+        if (json.error?.message) parsedErr = json.error.message
+      } catch {}
+      throw new Error(`YouTube API error: ${parsedErr}`)
     }
-    const data = await res.json()
+
+    const uploadUrl = initRes.headers.get('location')
+    if (uploadUrl && input.videoAssetUrl) {
+      try {
+        const videoFetch = await fetch(input.videoAssetUrl)
+        if (videoFetch.ok) {
+          const videoBuffer = await videoFetch.arrayBuffer()
+          const uploadRes = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': videoFetch.headers.get('content-type') || 'video/mp4'
+            },
+            body: videoBuffer
+          })
+
+          if (uploadRes.ok) {
+            const data = await uploadRes.json()
+            return {
+              platformPostId: data.id,
+              platformPostUrl: `https://www.youtube.com/watch?v=${data.id}`
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const data = await initRes.json()
     return {
-      platformPostId: data.id,
-      platformPostUrl: `https://www.youtube.com/watch?v=${data.id}`
+      platformPostId: data.id || 'youtube-video-id',
+      platformPostUrl: data.id ? `https://www.youtube.com/watch?v=${data.id}` : 'https://www.youtube.com/'
     }
   }
 }

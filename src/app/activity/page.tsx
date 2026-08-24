@@ -1,19 +1,36 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import AppShell from '@/components/AppShell'
 import { Card, StatusPill, PlatformChip, EmptyState } from '@/components/ui'
-import { mockActivity } from '@/lib/mock-data'
+import { ActivityItem } from '@/lib/types'
 import { formatDateTime } from '@/lib/utils'
 
 const STATUS_FILTERS = ['ALL', 'SUCCESS', 'WARNING', 'ERROR'] as const
 
 export default function ActivityPage() {
+  const [activities, setActivities] = useState<ActivityItem[]>([])
+  const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>('ALL')
 
+  useEffect(() => {
+    async function loadActivity() {
+      try {
+        const res = await fetch('/api/activity')
+        if (res.ok) {
+          const data = await res.json()
+          setActivities(data.activities || [])
+        }
+      } catch {} finally {
+        setLoading(false)
+      }
+    }
+    loadActivity()
+  }, [])
+
   const filtered = useMemo(
-    () => mockActivity.filter((a) => statusFilter === 'ALL' || a.status === statusFilter),
-    [statusFilter]
+    () => activities.filter((a) => statusFilter === 'ALL' || a.status === statusFilter),
+    [activities, statusFilter]
   )
 
   return (
@@ -34,7 +51,9 @@ export default function ActivityPage() {
       </div>
 
       <div className="mt-5">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="py-12 text-center text-sm text-slate-500">Loading activity timeline...</div>
+        ) : filtered.length === 0 ? (
           <EmptyState title="No activity" body="Nothing matches this filter yet." />
         ) : (
           <div className="space-y-2.5">
@@ -47,7 +66,7 @@ export default function ActivityPage() {
                     <p className="text-xs text-slate-400">{formatDateTime(a.createdAt)}</p>
                   </div>
                 </div>
-                {a.platform && <PlatformChip platform={a.platform} />}
+                {a.platform && <PlatformChip platform={a.platform as any} />}
               </Card>
             ))}
           </div>

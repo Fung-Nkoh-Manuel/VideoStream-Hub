@@ -5,18 +5,73 @@ import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
 import Video from '@/lib/models/Video'
 import User from '@/lib/models/User'
+import PublishJob from '@/lib/models/PublishJob'
 import { ActivityLog } from '@/lib/models/Activity'
 
-// GET /api/videos — the authenticated user's videos only. Every query in
-// this file filters by session.user.id so one user can never see, edit,
-// or delete another user's videos — the session identity is the only
-// source of truth for ownership, never a client-supplied id.
+// GET /api/videos — the authenticated user's videos only with real publish statuses.
 export async function GET() {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   await connectToDatabase()
-  const videos = await Video.find({ userId: session.user.id }).sort({ createdAt: -1 }).lean()
+
+  const rawVideos = await Video.find({ userId: session.user.id }).sort({ createdAt: -1 }).lean()
+  const videoIds = rawVideos.map((v) => v._id)
+
+  const publishJobs = await PublishJob.find({
+    userId: session.user.id,
+    videoId: { $in: videoIds }
+  }).lean()
+
+  const videos = rawVideos.map((v) => {
+    const jobs = publishJobs.filter((j) => j.videoId.toString() === v._id.toString())
+    const publishedJobs = jobs.filter((j) => j.status === 'PUBLISHED')
+    const failedJobs = jobs.filter((j) => j.status === 'FAILED')
+    const publishingJobs = jobs.filter((j) => j.status === 'PUBLISHING')
+
+    let publishStatus: 'DRAFT' | 'SCHEDULED' | 'PUBLISHED' | 'PARTIALLY_PUBLISHED' | 'FAILED' = 'DRAFT'
+    if (publishedJobs.length > 0) {
+      publishStatus = 'PUBLISHED'
+    } else if (publishingJobs.length > 0) {
+      publishStatus = 'DRAFT'
+    } else if (failedJobs.length > 0) {
+      publishStatus = 'FAILED'
+    }
+
+    const platforms = Array.from(
+      new Set(
+        publishedJobs
+          .map(() => 'YOUTUBE')
+      )
+    )
+
+    return {
+      id: v._id.toString(),
+      _id: v._id.toString(),
+      title: v.title,
+      description: v.description,
+      thumbnailUrl: v.thumbnailUrl || '/thumbs/thumb1.svg',
+      durationSeconds: v.durationSeconds || 0,
+      uploadedAt: v.createdAt ? new Date(v.createdAt).toISOString() : new Date().toISOString(),
+      status: v.status || 'READY',
+      publishStatus,
+      platforms,
+      visibility: v.visibility || 'PRIVATE',
+      sizeBytes: v.fileSizeBytes || 0,
+      originalFileUrl: v.originalFileUrl,
+      publishJobs: jobs.map((j) => ({
+        id: j._id.toString(),
+        status: j.status,
+        platform: 'YOUTUBE',
+        platformPostId: j.platformPostId,
+        platformPostUrl: j.platformPostUrl,
+        errorMessage: j.errorMessage,
+        publishedAt: j.publishedAt ? new Date(j.publishedAt).toISOString() : null,
+        createdAt: new Date(j.createdAt).toISOString()
+      }))
+    }
+  })
+
   return NextResponse.json({ videos })
 }
 
@@ -30,10 +85,7 @@ const createSchema = z.object({
   thumbnailUrl: z.string().url().optional()
 })
 
-// POST /api/videos — registers a video record AFTER the file has already
-// landed in Cloudinary via the signed direct-upload flow (see
-// /api/upload/sign and src/app/upload/page.tsx). This endpoint never
-// receives raw video bytes, keeping it well under Vercel's request limits.
+// POST /api/videos — registers a video record AFTER file direct-upload
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -60,7 +112,7 @@ export async function POST(req: Request) {
     fileSizeBytes,
     durationSeconds,
     thumbnailUrl,
-    status: 'PROCESSING'
+    status: 'READY'
   })
 
   await User.updateOne({ _id: session.user.id }, { $inc: { storageUsedBytes: fileSizeBytes } })

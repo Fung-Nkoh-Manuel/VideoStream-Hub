@@ -1,19 +1,37 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import AppShell from '@/components/AppShell'
 import { Card, Button, StatusPill, PlatformChip, EmptyState } from '@/components/ui'
-import { mockSchedule } from '@/lib/mock-data'
+import { ScheduledItemUI } from '@/lib/types'
 import { formatDateTime } from '@/lib/utils'
 import { Plus, Radio, Video, Repeat } from 'lucide-react'
 
 const VIEWS = ['Day', 'Week', 'Month'] as const
 
 export default function SchedulePage() {
+  const [schedule, setSchedule] = useState<ScheduledItemUI[]>([])
+  const [loading, setLoading] = useState(true)
   const [view, setView] = useState<(typeof VIEWS)[number]>('Week')
   const [selected, setSelected] = useState<string | null>(null)
 
-  const sorted = [...mockSchedule].sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
+  const loadSchedule = async () => {
+    try {
+      const res = await fetch('/api/schedule')
+      if (res.ok) {
+        const data = await res.json()
+        setSchedule(data.schedule || [])
+      }
+    } catch {} finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadSchedule()
+  }, [])
+
+  const sorted = [...schedule].sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
   const item = sorted.find((s) => s.id === selected)
 
   return (
@@ -34,7 +52,9 @@ export default function SchedulePage() {
         ))}
       </div>
 
-      {sorted.length === 0 ? (
+      {loading ? (
+        <div className="py-12 text-center text-sm text-slate-500">Loading schedule...</div>
+      ) : sorted.length === 0 ? (
         <EmptyState title="No scheduled content" body="Schedule your next video or live stream to see it here." action={<Button><Plus size={15} /> New schedule</Button>} />
       ) : (
         <div className="grid gap-6 lg:grid-cols-3">
