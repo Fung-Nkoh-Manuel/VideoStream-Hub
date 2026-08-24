@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
-import LiveStream from '@/lib/models/LiveStream'
-import { Destination } from '@/lib/models/Destination'
+import LiveStream, { ILiveStream } from '@/lib/models/LiveStream'
+import { Destination, IDestination } from '@/lib/models/Destination'
 import { getStreamingProvider, isStreamingConfigured } from '@/lib/streaming-provider'
 import { YouTubeConnector } from '@/lib/platform-connectors'
 
@@ -14,13 +14,13 @@ export async function GET() {
   const isConfigured = isStreamingConfigured()
   await connectToDatabase()
 
-  const destinations = await Destination.find({ userId: session.user.id, status: 'CONNECTED' }).lean()
-  let stream = await LiveStream.findOne({
+  const destinations = (await Destination.find({ userId: session.user.id, status: 'CONNECTED' }).lean()) as unknown as IDestination[]
+  let stream = (await LiveStream.findOne({
     userId: session.user.id,
     status: { $in: ['IDLE', 'STARTING', 'LIVE', 'STOPPING'] }
   })
     .select('+streamKey')
-    .lean()
+    .lean()) as unknown as ILiveStream | null
 
   if (stream && isConfigured && stream.providerStreamId) {
     try {
@@ -59,10 +59,10 @@ export async function POST(req: Request) {
     const provider = getStreamingProvider()
     const created = await provider.createStream({ title })
 
-    const validDestinations = await Destination.find({
+    const validDestinations = (await Destination.find({
       _id: { $in: destinationIds },
       userId: session.user.id
-    }).select('+accessToken +refreshToken')
+    }).select('+accessToken +refreshToken')) as unknown as IDestination[]
 
     const destinationRecords: Array<{
       destinationId: any
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
             accessToken = tokens.accessToken
             dest.accessToken = tokens.accessToken
             dest.tokenExpiresAt = tokens.expiresAt
-            await dest.save()
+            await (dest as any).save?.()
           }
 
           if (!accessToken) {
@@ -96,7 +96,7 @@ export async function POST(req: Request) {
 
           // 2. Add YouTube RTMP Target to Livepeer Multistreaming
           await provider.addDestination(created.streamId, {
-            id: dest._id.toString(),
+            id: String(dest._id),
             platform: 'YOUTUBE',
             rtmpUrl: ytLive.rtmpUrl,
             streamKey: ytLive.streamKey
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
         // Fallback for custom RTMP or non-YouTube destinations
         try {
           await provider.addDestination(created.streamId, {
-            id: dest._id.toString(),
+            id: String(dest._id),
             platform: dest.platform,
             rtmpUrl: (dest as any).rtmpUrl || 'rtmp://a.rtmp.youtube.com/live2',
             streamKey: (dest as any).streamKey || ''
@@ -152,7 +152,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       stream: {
-        id: stream._id.toString(),
+        id: String(stream._id),
         title: stream.title,
         description: stream.description,
         status: stream.status,

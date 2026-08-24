@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
-import ScheduledItem from '@/lib/models/ScheduledItem'
-import { Destination } from '@/lib/models/Destination'
+import ScheduledItem, { IScheduledItem } from '@/lib/models/ScheduledItem'
+import { Destination, IDestination } from '@/lib/models/Destination'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
@@ -11,21 +11,21 @@ export async function GET() {
 
   await connectToDatabase()
 
-  const rawItems = await ScheduledItem.find({ userId: session.user.id })
+  const rawItems = (await ScheduledItem.find({ userId: session.user.id })
     .sort({ scheduledAt: 1 })
-    .lean()
+    .lean()) as unknown as IScheduledItem[]
 
   const destIds = Array.from(new Set(rawItems.flatMap((i) => i.destinationIds || [])))
-  const destinations = await Destination.find({ _id: { $in: destIds } }).lean()
+  const destinations = (await Destination.find({ _id: { $in: destIds } }).lean()) as unknown as IDestination[]
 
   const items = rawItems.map((item) => {
     const itemDests = destinations.filter((d) =>
-      item.destinationIds?.some((id: any) => id.toString() === d._id.toString())
+      item.destinationIds?.some((id: any) => String(id) === String(d._id))
     )
     const platforms = Array.from(new Set(itemDests.map((d) => d.platform)))
 
     return {
-      id: item._id.toString(),
+      id: String(item._id),
       title: item.title,
       type: item.type,
       scheduledAt: item.scheduledAt ? new Date(item.scheduledAt).toISOString() : new Date().toISOString(),

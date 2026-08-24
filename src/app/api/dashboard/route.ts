@@ -2,13 +2,13 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
-import Video from '@/lib/models/Video'
-import User from '@/lib/models/User'
-import { Destination } from '@/lib/models/Destination'
-import ScheduledItem from '@/lib/models/ScheduledItem'
-import { ActivityLog } from '@/lib/models/Activity'
-import LiveStream from '@/lib/models/LiveStream'
-import PublishJob from '@/lib/models/PublishJob'
+import Video, { IVideo } from '@/lib/models/Video'
+import User, { IUser } from '@/lib/models/User'
+import { Destination, IDestination } from '@/lib/models/Destination'
+import ScheduledItem, { IScheduledItem } from '@/lib/models/ScheduledItem'
+import { ActivityLog, IActivityLog } from '@/lib/models/Activity'
+import LiveStream, { ILiveStream } from '@/lib/models/LiveStream'
+import PublishJob, { IPublishJob } from '@/lib/models/PublishJob'
 import { PLATFORM_CONFIG } from '@/lib/platform-connectors'
 
 export async function GET() {
@@ -19,36 +19,25 @@ export async function GET() {
 
   const userId = session.user.id
 
-  const [
-    user,
-    allDestinations,
-    totalVideos,
-    upcomingScheduledCount,
-    activeLiveStream,
-    recentVideosRaw,
-    recentActivityRaw,
-    upcomingRaw
-  ] = await Promise.all([
-    User.findById(userId).lean(),
-    Destination.find({ userId }).lean(),
-    Video.countDocuments({ userId }),
-    ScheduledItem.countDocuments({ userId, status: 'SCHEDULED' }),
-    LiveStream.findOne({ userId, status: 'LIVE' }).lean(),
-    Video.find({ userId }).sort({ createdAt: -1 }).limit(4).lean(),
-    ActivityLog.find({ userId }).sort({ createdAt: -1 }).limit(5).lean(),
-    ScheduledItem.find({ userId, status: 'SCHEDULED' }).sort({ scheduledAt: 1 }).limit(3).lean()
-  ])
+  const user = (await User.findById(userId).lean()) as unknown as IUser | null
+  const allDestinations = (await Destination.find({ userId }).lean()) as unknown as IDestination[]
+  const totalVideos = await Video.countDocuments({ userId })
+  const upcomingScheduledCount = await ScheduledItem.countDocuments({ userId, status: 'SCHEDULED' })
+  const activeLiveStream = (await LiveStream.findOne({ userId, status: 'LIVE' }).lean()) as unknown as ILiveStream | null
+  const recentVideosRaw = (await Video.find({ userId }).sort({ createdAt: -1 }).limit(4).lean()) as unknown as IVideo[]
+  const recentActivityRaw = (await ActivityLog.find({ userId }).sort({ createdAt: -1 }).limit(5).lean()) as unknown as IActivityLog[]
+  const upcomingRaw = (await ScheduledItem.find({ userId, status: 'SCHEDULED' }).sort({ scheduledAt: 1 }).limit(3).lean()) as unknown as IScheduledItem[]
 
   const connectedDestinations = allDestinations.filter((d) => d.status === 'CONNECTED')
 
   const recentVideoIds = recentVideosRaw.map((v) => v._id)
-  const publishJobs = await PublishJob.find({ userId, videoId: { $in: recentVideoIds } }).lean()
+  const publishJobs = (await PublishJob.find({ userId, videoId: { $in: recentVideoIds } }).lean()) as unknown as IPublishJob[]
 
   const recentVideos = recentVideosRaw.map((v) => {
-    const jobs = publishJobs.filter((j) => j.videoId.toString() === v._id.toString())
+    const jobs = publishJobs.filter((j) => String(j.videoId) === String(v._id))
     const published = jobs.some((j) => j.status === 'PUBLISHED')
     return {
-      id: v._id.toString(),
+      id: String(v._id),
       title: v.title,
       durationSeconds: v.durationSeconds || 0,
       uploadedAt: v.createdAt ? new Date(v.createdAt).toISOString() : new Date().toISOString(),
@@ -58,7 +47,7 @@ export async function GET() {
   })
 
   const recentActivity = recentActivityRaw.map((a) => ({
-    id: a._id.toString(),
+    id: String(a._id),
     message: a.message,
     status: a.status,
     platform: a.platform,
@@ -66,7 +55,7 @@ export async function GET() {
   }))
 
   const upcoming = upcomingRaw.map((s) => ({
-    id: s._id.toString(),
+    id: String(s._id),
     title: s.title,
     scheduledAt: s.scheduledAt ? new Date(s.scheduledAt).toISOString() : new Date().toISOString(),
     platforms: ['YOUTUBE']
@@ -76,7 +65,7 @@ export async function GET() {
   const connectedPlatforms = allPlatformKeys.map((key) => {
     const d = allDestinations.find((dest) => dest.platform === key)
     return {
-      id: d ? d._id.toString() : key,
+      id: d ? String(d._id) : key,
       platform: key,
       status: d ? d.status : 'NOT_CONNECTED'
     }

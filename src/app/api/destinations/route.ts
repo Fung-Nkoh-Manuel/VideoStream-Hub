@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
-import { Destination } from '@/lib/models/Destination'
+import { Destination, IDestination } from '@/lib/models/Destination'
 import { isPlatformConfigured, PlatformKey, PLATFORM_CONFIG } from '@/lib/platform-connectors'
 
 export async function GET() {
@@ -11,7 +11,7 @@ export async function GET() {
 
   await connectToDatabase()
 
-  const destinations = await Destination.find({ userId: session.user.id }).lean()
+  const destinations = (await Destination.find({ userId: session.user.id }).lean()) as unknown as IDestination[]
 
   const configuredPlatforms: Record<string, boolean> = {}
   for (const key of Object.keys(PLATFORM_CONFIG) as PlatformKey[]) {

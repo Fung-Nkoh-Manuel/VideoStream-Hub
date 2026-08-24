@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
-import AnalyticsSnapshot from '@/lib/models/Analytics'
+import AnalyticsSnapshot, { IAnalyticsSnapshot } from '@/lib/models/Analytics'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
@@ -10,9 +10,9 @@ export async function GET() {
 
   await connectToDatabase()
 
-  const snapshots = await AnalyticsSnapshot.find({ userId: session.user.id })
+  const snapshots = (await AnalyticsSnapshot.find({ userId: session.user.id })
     .sort({ capturedAt: -1 })
-    .lean()
+    .lean()) as unknown as IAnalyticsSnapshot[]
 
   // Aggregate totals across all platforms
   const totals = snapshots.reduce(

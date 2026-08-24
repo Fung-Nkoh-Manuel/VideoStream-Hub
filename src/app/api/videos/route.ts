@@ -3,9 +3,9 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
-import Video from '@/lib/models/Video'
+import Video, { IVideo } from '@/lib/models/Video'
 import User from '@/lib/models/User'
-import PublishJob from '@/lib/models/PublishJob'
+import PublishJob, { IPublishJob } from '@/lib/models/PublishJob'
 import { ActivityLog } from '@/lib/models/Activity'
 
 // GET /api/videos — the authenticated user's videos only with real publish statuses.
@@ -15,16 +15,16 @@ export async function GET() {
 
   await connectToDatabase()
 
-  const rawVideos = await Video.find({ userId: session.user.id }).sort({ createdAt: -1 }).lean()
+  const rawVideos = (await Video.find({ userId: session.user.id }).sort({ createdAt: -1 }).lean()) as unknown as IVideo[]
   const videoIds = rawVideos.map((v) => v._id)
 
-  const publishJobs = await PublishJob.find({
+  const publishJobs = (await PublishJob.find({
     userId: session.user.id,
     videoId: { $in: videoIds }
-  }).lean()
+  }).lean()) as unknown as IPublishJob[]
 
   const videos = rawVideos.map((v) => {
-    const jobs = publishJobs.filter((j) => j.videoId.toString() === v._id.toString())
+    const jobs = publishJobs.filter((j) => String(j.videoId) === String(v._id))
     const publishedJobs = jobs.filter((j) => j.status === 'PUBLISHED')
     const failedJobs = jobs.filter((j) => j.status === 'FAILED')
     const publishingJobs = jobs.filter((j) => j.status === 'PUBLISHING')
@@ -46,8 +46,8 @@ export async function GET() {
     )
 
     return {
-      id: v._id.toString(),
-      _id: v._id.toString(),
+      id: String(v._id),
+      _id: String(v._id),
       title: v.title,
       description: v.description,
       thumbnailUrl: v.thumbnailUrl || '/thumbs/thumb1.svg',
@@ -60,7 +60,7 @@ export async function GET() {
       sizeBytes: v.fileSizeBytes || 0,
       originalFileUrl: v.originalFileUrl,
       publishJobs: jobs.map((j) => ({
-        id: j._id.toString(),
+        id: String(j._id),
         status: j.status,
         platform: 'YOUTUBE',
         platformPostId: j.platformPostId,
