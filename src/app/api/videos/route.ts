@@ -7,6 +7,7 @@ import Video, { IVideo } from '@/lib/models/Video'
 import User from '@/lib/models/User'
 import PublishJob, { IPublishJob } from '@/lib/models/PublishJob'
 import { ActivityLog } from '@/lib/models/Activity'
+import cloudinary from '@/lib/cloudinary'
 
 // GET /api/videos — the authenticated user's videos only with real publish statuses.
 export async function GET() {
@@ -119,4 +120,51 @@ export async function POST(req: Request) {
   await ActivityLog.create({ userId: session.user.id, videoId: video._id, type: 'UPLOAD', status: 'SUCCESS', message: `${title} uploaded, processing started` })
 
   return NextResponse.json({ video })
+}
+
+// DELETE /api/videos?id=<id> — deletes video, associated Cloudinary media, storage usage, & publish jobs
+export async function DELETE(req: Request) {
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { searchParams } = new URL(req.url)
+  const id = searchParams.get('id')
+  if (!id) return NextResponse.json({ error: 'Video ID is required' }, { status: 400 })
+
+  await connectToDatabase()
+
+  const video = await Video.findOne({ _id: id, userId: session.user.id })
+  if (!video) return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+
+  // 1. Delete asset from Cloudinary
+  if (video.cloudinaryPublicId) {
+    try {
+      await cloudinary.uploader.destroy(video.cloudinaryPublicId, { resource_type: 'video' })
+    } catch (cloudErr) {
+      console.warn('Cloudinary asset deletion error:', cloudErr)
+    }
+  }
+
+  // 2. Decrement user storage usage
+  const sizeToReduce = video.fileSizeBytes || 0
+  await User.updateOne(
+    { _id: session.user.id },
+    { $inc: { storageUsedBytes: -sizeToReduce } }
+  )
+
+  // 3. Delete related PublishJob documents
+  await PublishJob.deleteMany({ videoId: id })
+
+  // 4. Delete Video document
+  await Video.deleteOne({ _id: id })
+
+  // 5. Log activity
+  await ActivityLog.create({
+    userId: session.user.id,
+    type: 'PROCESSING',
+    status: 'SUCCESS',
+    message: `Deleted video "${video.title}"`
+  })
+
+  return NextResponse.json({ success: true })
 }

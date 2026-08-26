@@ -4,8 +4,9 @@ import { useEffect, useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import AppShell from '@/components/AppShell'
 import { Card, Button, PlatformChip, StatusPill } from '@/components/ui'
-import { Camera, Radio, Copy, Eye, EyeOff, AlertTriangle, AlertCircle, Film } from 'lucide-react'
+import { Camera, Radio, Copy, Eye, EyeOff, AlertTriangle, AlertCircle, Film, Monitor, Mic, MicOff, Video, VideoOff } from 'lucide-react'
 import { PLATFORM_CONFIG, PlatformKey } from '@/lib/platform-connectors'
+import { startWhipStream, stopWhipStream } from '@/lib/whip-streamer'
 
 interface Destination {
   id: string
@@ -28,7 +29,9 @@ function LiveStudioContent() {
   const preselectedVideoId = searchParams.get('videoId')
 
   const [isConfigured, setIsConfigured] = useState(false)
-  const [sourceType, setSourceType] = useState<'ENCODER' | 'PRERECORDED'>('ENCODER')
+  const [sourceType, setSourceType] = useState<'BROWSER' | 'ENCODER' | 'PRERECORDED'>('BROWSER')
+  const [browserMode, setBrowserMode] = useState<'WEBCAM' | 'SCREENSHARE'>('WEBCAM')
+
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [selected, setSelected] = useState<string[]>([])
@@ -36,7 +39,19 @@ function LiveStudioContent() {
   const [connectedDestinations, setConnectedDestinations] = useState<Destination[]>([])
   const [userVideos, setUserVideos] = useState<VideoItem[]>([])
   const [selectedVideoId, setSelectedVideoId] = useState<string>(preselectedVideoId || '')
-  
+
+  // Media devices
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([])
+  const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([])
+  const [selectedCamera, setSelectedCamera] = useState<string>('')
+  const [selectedMic, setSelectedMic] = useState<string>('')
+  const [micMuted, setMicMuted] = useState(false)
+  const [videoDisabled, setVideoDisabled] = useState(false)
+
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
+
   const [streamId, setStreamId] = useState<string | null>(null)
   const [status, setStatus] = useState<'IDLE' | 'STARTING' | 'LIVE' | 'STOPPING' | 'ENDED' | 'ERROR'>('IDLE')
   const [destStatuses, setDestStatuses] = useState<Record<string, { status: string; errorMessage?: string }>>({})
@@ -108,9 +123,71 @@ function LiveStudioContent() {
     }
   }
 
+  // Enumerate camera/mic devices
+  const enumerateDevices = async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.enumerateDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const videoInputs = devices.filter((d) => d.kind === 'videoinput')
+        const audioInputs = devices.filter((d) => d.kind === 'audioinput')
+        setCameras(videoInputs)
+        setMicrophones(audioInputs)
+        if (videoInputs.length > 0 && !selectedCamera) setSelectedCamera(videoInputs[0].deviceId)
+        if (audioInputs.length > 0 && !selectedMic) setSelectedMic(audioInputs[0].deviceId)
+      }
+    } catch {}
+  }
+
   useEffect(() => {
     loadInitialState()
+    enumerateDevices()
   }, [preselectedVideoId])
+
+  // Setup preview stream for browser mode
+  useEffect(() => {
+    let isActive = true
+
+    async function initPreviewStream() {
+      if (sourceType !== 'BROWSER' || status === 'LIVE') return
+
+      try {
+        if (mediaStreamRef.current) {
+          mediaStreamRef.current.getTracks().forEach((t) => t.stop())
+        }
+
+        let stream: MediaStream
+        if (browserMode === 'SCREENSHARE') {
+          stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+        } else {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: selectedCamera ? { deviceId: { exact: selectedCamera } } : true,
+            audio: selectedMic ? { deviceId: { exact: selectedMic } } : true
+          })
+        }
+
+        if (!isActive) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
+        }
+
+        mediaStreamRef.current = stream
+        if (previewVideoRef.current) {
+          previewVideoRef.current.srcObject = stream
+        }
+        await enumerateDevices()
+      } catch (err) {
+        // User denied camera/screen share permission or no devices
+      }
+    }
+
+    if (sourceType === 'BROWSER' && status === 'IDLE') {
+      initPreviewStream()
+    }
+
+    return () => {
+      isActive = false
+    }
+  }, [sourceType, browserMode, selectedCamera, selectedMic, status])
 
   useEffect(() => {
     if (status === 'LIVE') {
@@ -163,6 +240,26 @@ function LiveStudioContent() {
     }
   }
 
+  const toggleMic = () => {
+    if (mediaStreamRef.current) {
+      const audioTracks = mediaStreamRef.current.getAudioTracks()
+      audioTracks.forEach((t) => {
+        t.enabled = micMuted
+      })
+      setMicMuted(!micMuted)
+    }
+  }
+
+  const toggleVideo = () => {
+    if (mediaStreamRef.current) {
+      const videoTracks = mediaStreamRef.current.getVideoTracks()
+      videoTracks.forEach((t) => {
+        t.enabled = videoDisabled
+      })
+      setVideoDisabled(!videoDisabled)
+    }
+  }
+
   const handleStartStream = async () => {
     if (selected.length === 0) return
     if (sourceType === 'PRERECORDED' && !selectedVideoId) {
@@ -183,7 +280,7 @@ function LiveStudioContent() {
           title: title || 'Live Stream',
           description,
           destinationIds: selected,
-          sourceType,
+          sourceType: sourceType === 'BROWSER' ? 'ENCODER' : sourceType,
           videoId: sourceType === 'PRERECORDED' ? selectedVideoId : undefined
         })
       })
@@ -194,11 +291,12 @@ function LiveStudioContent() {
       }
 
       const newStreamId = createData.stream.id || createData.stream._id
+      const currentStreamKey = createData.stream.streamKey
       setStreamId(newStreamId)
       if (createData.stream.rtmpIngestUrl) setServerUrl(createData.stream.rtmpIngestUrl)
-      if (createData.stream.streamKey) setStreamKey(createData.stream.streamKey)
+      if (currentStreamKey) setStreamKey(currentStreamKey)
 
-      // 2. Start stream
+      // 2. Start stream on server & YouTube
       const startRes = await fetch('/api/live/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -212,6 +310,16 @@ function LiveStudioContent() {
 
       if (startData.prerecordedNotice) {
         setWorkerNotice(startData.prerecordedNotice)
+      }
+
+      // 3. If BROWSER mode, connect native WebRTC WHIP stream to Livepeer
+      if (sourceType === 'BROWSER') {
+        if (!mediaStreamRef.current) {
+          throw new Error('Camera/Microphone stream is not available. Please grant permissions and try again.')
+        }
+
+        const pc = await startWhipStream(mediaStreamRef.current, currentStreamKey)
+        peerConnectionRef.current = pc
       }
 
       setStatus('LIVE')
@@ -230,6 +338,10 @@ function LiveStudioContent() {
     setWorkerNotice(null)
 
     try {
+      // Clean up WebRTC WHIP browser stream
+      stopWhipStream(peerConnectionRef.current, mediaStreamRef.current)
+      peerConnectionRef.current = null
+
       const res = await fetch('/api/live/stop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -261,7 +373,7 @@ function LiveStudioContent() {
   return (
     <AppShell>
       <h1 className="text-2xl font-bold text-ink-800">Live Studio</h1>
-      <p className="mt-1 text-sm text-slate-500">Multistream live broadcasts from your encoder, webcam, or prerecorded video library.</p>
+      <p className="mt-1 text-sm text-slate-500">Multistream live broadcasts from your browser camera/screenshare, OBS encoder, or prerecorded video library.</p>
 
       {!isConfigured && (
         <Card className="mt-6 flex items-start gap-3 !border-amber-200 !bg-amber-50">
@@ -295,16 +407,23 @@ function LiveStudioContent() {
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          {/* Source Mode Toggle */}
+          {/* Source Mode Selector */}
           <Card>
             <h2 className="mb-3 text-sm font-semibold text-ink-800">Stream Source</h2>
             <div className="flex rounded-xl bg-slate-100 p-1 text-sm font-medium">
+              <button
+                onClick={() => setSourceType('BROWSER')}
+                disabled={status === 'LIVE'}
+                className={`focus-ring flex-1 rounded-lg py-2 text-center transition-colors ${sourceType === 'BROWSER' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
+              >
+                Browser (Camera / Screen)
+              </button>
               <button
                 onClick={() => setSourceType('ENCODER')}
                 disabled={status === 'LIVE'}
                 className={`focus-ring flex-1 rounded-lg py-2 text-center transition-colors ${sourceType === 'ENCODER' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
               >
-                Webcam / OBS / Encoder
+                OBS / External Encoder
               </button>
               <button
                 onClick={() => setSourceType('PRERECORDED')}
@@ -316,7 +435,107 @@ function LiveStudioContent() {
             </div>
           </Card>
 
-          {sourceType === 'PRERECORDED' ? (
+          {/* Source Controls */}
+          {sourceType === 'BROWSER' && (
+            <Card className="!p-0 overflow-hidden relative">
+              <div className="relative flex aspect-video items-center justify-center bg-ink-900">
+                <video
+                  ref={previewVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="h-full w-full object-cover"
+                />
+                {!mediaStreamRef.current && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/50 bg-ink-900">
+                    <Camera size={32} />
+                    <p className="text-sm">Grant browser camera/screen permissions to enable live preview.</p>
+                  </div>
+                )}
+                {status === 'LIVE' && (
+                  <div className="absolute top-3 left-3 flex items-center gap-2 rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white animate-pulse">
+                    <span className="h-2 w-2 rounded-full bg-white" /> LIVE (WebRTC)
+                  </div>
+                )}
+              </div>
+
+              {/* Browser Media Controls */}
+              <div className="p-4 space-y-3 bg-white">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex rounded-lg bg-slate-100 p-1 text-xs font-medium">
+                    <button
+                      onClick={() => setBrowserMode('WEBCAM')}
+                      disabled={status === 'LIVE'}
+                      className={`px-3 py-1.5 rounded-md transition-colors ${browserMode === 'WEBCAM' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
+                    >
+                      Camera & Mic
+                    </button>
+                    <button
+                      onClick={() => setBrowserMode('SCREENSHARE')}
+                      disabled={status === 'LIVE'}
+                      className={`px-3 py-1.5 rounded-md transition-colors ${browserMode === 'SCREENSHARE' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
+                    >
+                      Screen Share
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={toggleMic}
+                      className={`p-2 rounded-xl border text-slate-600 transition-colors ${micMuted ? 'bg-red-50 border-red-200 text-red-600' : 'border-slate-200 hover:bg-slate-50'}`}
+                      title={micMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+                    >
+                      {micMuted ? <MicOff size={16} /> : <Mic size={16} />}
+                    </button>
+                    <button
+                      onClick={toggleVideo}
+                      className={`p-2 rounded-xl border text-slate-600 transition-colors ${videoDisabled ? 'bg-red-50 border-red-200 text-red-600' : 'border-slate-200 hover:bg-slate-50'}`}
+                      title={videoDisabled ? 'Enable Video' : 'Disable Video'}
+                    >
+                      {videoDisabled ? <VideoOff size={16} /> : <Video size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {browserMode === 'WEBCAM' && (
+                  <div className="grid gap-3 sm:grid-cols-2 text-xs">
+                    <div>
+                      <label className="mb-1 block font-medium text-slate-500">Camera</label>
+                      <select
+                        value={selectedCamera}
+                        onChange={(e) => setSelectedCamera(e.target.value)}
+                        disabled={status === 'LIVE'}
+                        className="focus-ring w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700"
+                      >
+                        {cameras.map((c) => (
+                          <option key={c.deviceId} value={c.deviceId}>
+                            {c.label || `Camera ${c.deviceId.slice(0, 5)}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-medium text-slate-500">Microphone</label>
+                      <select
+                        value={selectedMic}
+                        onChange={(e) => setSelectedMic(e.target.value)}
+                        disabled={status === 'LIVE'}
+                        className="focus-ring w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700"
+                      >
+                        {microphones.map((m) => (
+                          <option key={m.deviceId} value={m.deviceId}>
+                            {m.label || `Microphone ${m.deviceId.slice(0, 5)}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
+
+          {sourceType === 'PRERECORDED' && (
             <Card>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-ink-800 flex items-center gap-2">
@@ -350,12 +569,14 @@ function LiveStudioContent() {
                 </div>
               )}
             </Card>
-          ) : (
+          )}
+
+          {sourceType === 'ENCODER' && (
             <Card className="!p-0 overflow-hidden">
               <div className="flex aspect-video items-center justify-center bg-ink-900">
                 <div className="flex flex-col items-center gap-2 text-white/50">
                   <Camera size={32} />
-                  <p className="text-sm">Camera / Encoder preview</p>
+                  <p className="text-sm">OBS / External Encoder input ready</p>
                 </div>
               </div>
             </Card>

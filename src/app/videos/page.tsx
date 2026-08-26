@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import AppShell from '@/components/AppShell'
 import { Card, StatusPill, PlatformChip, Button, EmptyState } from '@/components/ui'
 import { formatBytes, formatDuration, formatRelativeTime } from '@/lib/utils'
-import { Search, MoreVertical, Play, Pencil, Send, CalendarClock, Copy, Trash2, History, AlertCircle, CheckCircle2, ExternalLink, Radio } from 'lucide-react'
+import { Search, MoreVertical, Play, Send, Copy, Trash2, History, AlertCircle, CheckCircle2, ExternalLink, Radio } from 'lucide-react'
 import Link from 'next/link'
 
 interface PublishJobUI {
@@ -52,6 +52,8 @@ export default function VideosPage() {
   const [openMenu, setOpenMenu] = useState<string | null>(null)
 
   const [publishingId, setPublishingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmDeleteVideo, setConfirmDeleteVideo] = useState<VideoItem | null>(null)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string; url?: string } | null>(null)
   const [selectedHistoryVideo, setSelectedHistoryVideo] = useState<VideoItem | null>(null)
 
@@ -105,6 +107,41 @@ export default function VideosPage() {
       })
     } finally {
       setPublishingId(null)
+    }
+  }
+
+  const handleDeleteVideo = async () => {
+    if (!confirmDeleteVideo) return
+    const video = confirmDeleteVideo
+    setConfirmDeleteVideo(null)
+    setDeletingId(video.id)
+    setFeedback(null)
+
+    try {
+      const res = await fetch(`/api/videos?id=${video.id}`, {
+        method: 'DELETE'
+      })
+
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        setFeedback({
+          type: 'error',
+          message: data.error || 'Failed to delete video.'
+        })
+      } else {
+        setFeedback({
+          type: 'success',
+          message: `Successfully deleted "${video.title}".`
+        })
+        await loadVideos()
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err.message || 'Failed to delete video.'
+      })
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -191,11 +228,14 @@ export default function VideosPage() {
                     <Link href={`/live?videoId=${v.id}`} onClick={() => setOpenMenu(null)} className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-ink-700 hover:bg-slate-50">
                       <Radio size={13} className="text-red-500" /> Go Live with Video
                     </Link>
-                    <button onClick={() => handlePublishToYouTube(v)} disabled={publishingId === v.id} className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-ink-700 hover:bg-slate-50">
+                    <button onClick={() => handlePublishToYouTube(v)} disabled={publishingId === v.id || deletingId === v.id} className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-ink-700 hover:bg-slate-50">
                       <Send size={13} className="text-teal-600" /> {publishingId === v.id ? 'Publishing to YouTube...' : 'Publish to YouTube'}
                     </button>
                     <button onClick={() => { setOpenMenu(null); setSelectedHistoryVideo(v) }} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-ink-700 hover:bg-slate-50">
                       <History size={13} /> View history
+                    </button>
+                    <button onClick={() => { setOpenMenu(null); setConfirmDeleteVideo(v) }} disabled={deletingId === v.id} className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">
+                      <Trash2 size={13} /> {deletingId === v.id ? 'Deleting...' : 'Delete video'}
                     </button>
                   </div>
                 )}
@@ -215,6 +255,23 @@ export default function VideosPage() {
         </div>
       )}
 
+      {/* Delete Confirmation Modal */}
+      {confirmDeleteVideo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-card">
+            <h2 className="text-base font-semibold text-ink-800">Delete Video</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Are you sure you want to delete <span className="font-semibold text-ink-800">"{confirmDeleteVideo.title}"</span>? This will permanently remove the video, Cloudinary media, and its publishing history.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setConfirmDeleteVideo(null)}>Cancel</Button>
+              <Button size="sm" variant="danger" onClick={handleDeleteVideo}>Delete</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* History Modal */}
       {selectedHistoryVideo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
