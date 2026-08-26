@@ -2,6 +2,7 @@ import { Schema, model, models, Document, Types } from 'mongoose'
 
 export type StreamStatus = 'IDLE' | 'STARTING' | 'LIVE' | 'STOPPING' | 'ENDED' | 'ERROR'
 export type StreamDestStatus = 'PENDING' | 'LIVE' | 'STOPPED' | 'ERROR'
+export type StreamSourceType = 'ENCODER' | 'PRERECORDED'
 
 export interface IStreamDestination {
   destinationId: Types.ObjectId
@@ -19,6 +20,9 @@ export interface ILiveStream extends Document {
   title: string
   description?: string
   status: StreamStatus
+  sourceType?: StreamSourceType
+  videoId?: Types.ObjectId
+  videoUrl?: string
   streamKey: string
   rtmpIngestUrl?: string
   providerStreamId?: string // id from the streaming relay provider, see streaming-provider.ts
@@ -47,6 +51,9 @@ const LiveStreamSchema = new Schema<ILiveStream>(
     title: { type: String, required: true },
     description: String,
     status: { type: String, enum: ['IDLE', 'STARTING', 'LIVE', 'STOPPING', 'ENDED', 'ERROR'], default: 'IDLE' },
+    sourceType: { type: String, enum: ['ENCODER', 'PRERECORDED'], default: 'ENCODER' },
+    videoId: { type: Schema.Types.ObjectId, ref: 'Video' },
+    videoUrl: String,
     streamKey: { type: String, required: true, select: false },
     rtmpIngestUrl: String,
     providerStreamId: String,

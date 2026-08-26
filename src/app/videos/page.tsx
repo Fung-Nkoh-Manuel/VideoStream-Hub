@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import AppShell from '@/components/AppShell'
 import { Card, StatusPill, PlatformChip, Button, EmptyState } from '@/components/ui'
 import { formatBytes, formatDuration, formatRelativeTime } from '@/lib/utils'
-import { Search, MoreVertical, Play, Pencil, Send, CalendarClock, Copy, Trash2, History, AlertCircle, CheckCircle2, ExternalLink } from 'lucide-react'
+import { Search, MoreVertical, Play, Pencil, Send, CalendarClock, Copy, Trash2, History, AlertCircle, CheckCircle2, ExternalLink, Radio } from 'lucide-react'
 import Link from 'next/link'
 
 interface PublishJobUI {
@@ -187,7 +187,10 @@ export default function VideosPage() {
                   <MoreVertical size={14} />
                 </button>
                 {openMenu === v.id && (
-                  <div className="absolute right-2 top-9 z-10 w-48 rounded-xl border border-slate-100 bg-white py-1.5 text-left shadow-card">
+                  <div className="absolute right-2 top-9 z-10 w-52 rounded-xl border border-slate-100 bg-white py-1.5 text-left shadow-card">
+                    <Link href={`/live?videoId=${v.id}`} onClick={() => setOpenMenu(null)} className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-ink-700 hover:bg-slate-50">
+                      <Radio size={13} className="text-red-500" /> Go Live with Video
+                    </Link>
                     <button onClick={() => handlePublishToYouTube(v)} disabled={publishingId === v.id} className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-ink-700 hover:bg-slate-50">
                       <Send size={13} className="text-teal-600" /> {publishingId === v.id ? 'Publishing to YouTube...' : 'Publish to YouTube'}
                     </button>

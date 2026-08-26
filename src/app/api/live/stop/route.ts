@@ -6,6 +6,7 @@ import LiveStream from '@/lib/models/LiveStream'
 import { Destination } from '@/lib/models/Destination'
 import { getStreamingProvider, isStreamingConfigured } from '@/lib/streaming-provider'
 import { YouTubeConnector } from '@/lib/platform-connectors'
+import { stopPrerecordedStream } from '@/lib/prerecorded-streamer'
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions)
@@ -17,6 +18,9 @@ export async function POST(req: Request) {
   await connectToDatabase()
   const liveStream = await LiveStream.findOne({ _id: streamId, userId: session.user.id })
   if (!liveStream) return NextResponse.json({ error: 'Stream not found' }, { status: 404 })
+
+  // Stop active FFmpeg prerecorded stream if running
+  stopPrerecordedStream(streamId)
 
   if (isStreamingConfigured() && liveStream.providerStreamId) {
     try {

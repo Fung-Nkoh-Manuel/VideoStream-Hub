@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "worker": "tsx scripts/prerecorded-worker.ts"
   },
   "dependencies": {
     "@auth/mongodb-adapter": "^3.11.3",

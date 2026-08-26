@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
 import LiveStream, { ILiveStream } from '@/lib/models/LiveStream'
+import Video from '@/lib/models/Video'
 import { Destination, IDestination } from '@/lib/models/Destination'
 import { getStreamingProvider, isStreamingConfigured } from '@/lib/streaming-provider'
 import { YouTubeConnector } from '@/lib/platform-connectors'
@@ -43,10 +44,12 @@ export async function POST(req: Request) {
     )
   }
 
-  const { title, description, destinationIds = [] } = (await req.json()) as {
+  const { title, description, destinationIds = [], sourceType = 'ENCODER', videoId } = (await req.json()) as {
     title: string
     description?: string
     destinationIds: string[]
+    sourceType?: 'ENCODER' | 'PRERECORDED'
+    videoId?: string
   }
 
   if (!title) {
@@ -54,6 +57,18 @@ export async function POST(req: Request) {
   }
 
   await connectToDatabase()
+
+  let videoUrl: string | undefined
+  if (sourceType === 'PRERECORDED') {
+    if (!videoId) {
+      return NextResponse.json({ error: 'videoId is required for prerecorded video live streams.' }, { status: 400 })
+    }
+    const videoDoc = await Video.findOne({ _id: videoId, userId: session.user.id })
+    if (!videoDoc) {
+      return NextResponse.json({ error: 'Selected video was not found or access denied.' }, { status: 404 })
+    }
+    videoUrl = videoDoc.originalFileUrl
+  }
 
   try {
     const provider = getStreamingProvider()
@@ -144,6 +159,9 @@ export async function POST(req: Request) {
       title,
       description,
       status: 'IDLE',
+      sourceType,
+      videoId,
+      videoUrl,
       streamKey: created.streamKey,
       rtmpIngestUrl: created.rtmpIngestUrl,
       providerStreamId: created.streamId,
@@ -156,6 +174,9 @@ export async function POST(req: Request) {
         title: stream.title,
         description: stream.description,
         status: stream.status,
+        sourceType: stream.sourceType,
+        videoId: stream.videoId ? String(stream.videoId) : undefined,
+        videoUrl: stream.videoUrl,
         streamKey: created.streamKey,
         rtmpIngestUrl: created.rtmpIngestUrl,
         providerStreamId: created.streamId,
