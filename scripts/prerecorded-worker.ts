@@ -2,7 +2,7 @@
 // Can be run on any server/VPS using: npx tsx scripts/prerecorded-worker.ts or npm run worker
 
 import { connectToDatabase } from '../src/lib/mongodb'
-import LiveStream from '../src/lib/models/LiveStream'
+import LiveStream, { ILiveStream } from '../src/lib/models/LiveStream'
 import Video from '../src/lib/models/Video'
 import { getStreamingProvider } from '../src/lib/streaming-provider'
 import {
@@ -29,15 +29,15 @@ async function runWorkerLoop() {
   setInterval(async () => {
     try {
       // Find streams marked as STARTING or LIVE with sourceType PRERECORDED
-      const streams = await LiveStream.find({
+      const streams = (await LiveStream.find({
         sourceType: 'PRERECORDED',
         status: { $in: ['STARTING', 'LIVE'] }
       })
         .select('+streamKey')
-        .lean()
+        .lean()) as unknown as ILiveStream[]
 
       for (const s of streams) {
-        const streamId = s._id.toString()
+        const streamId = String(s._id)
         const active = getActivePrerecordedStream(streamId)
 
         if (!active && s.videoUrl && s.rtmpIngestUrl && s.streamKey) {
