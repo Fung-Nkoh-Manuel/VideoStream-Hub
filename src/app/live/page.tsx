@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import AppShell from '@/components/AppShell'
 import { Card, Button, PlatformChip, StatusPill } from '@/components/ui'
-import { Camera, Radio, Copy, Eye, EyeOff, AlertTriangle, AlertCircle, Film, CheckCircle2 } from 'lucide-react'
+import { Camera, Radio, Copy, Eye, EyeOff, AlertTriangle, AlertCircle, Film } from 'lucide-react'
 import { PLATFORM_CONFIG, PlatformKey } from '@/lib/platform-connectors'
 
 interface Destination {
@@ -23,7 +23,7 @@ interface VideoItem {
   sizeBytes?: number
 }
 
-export default function LiveStudioPage() {
+function LiveStudioContent() {
   const searchParams = useSearchParams()
   const preselectedVideoId = searchParams.get('videoId')
 
@@ -462,5 +462,13 @@ export default function LiveStudioPage() {
         </div>
       </div>
     </AppShell>
+  )
+}
+
+export default function LiveStudioPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-sm text-slate-500">Loading Live Studio...</div>}>
+      <LiveStudioContent />
+    </Suspense>
   )
 }
