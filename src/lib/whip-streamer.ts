@@ -1,4 +1,5 @@
 // WebRTC WHIP (WebRTC HTTP Ingestion Protocol) helper for browser-based live streaming directly to Livepeer.
+// Uses server-side API proxy route (/api/live/whip) to eliminate browser CORS errors and keep API keys secure.
 
 export async function startWhipStream(
   mediaStream: MediaStream,
@@ -17,9 +18,9 @@ export async function startWhipStream(
   const offer = await pc.createOffer()
   await pc.setLocalDescription(offer)
 
-  // Livepeer WHIP WebRTC ingest endpoint
-  const whipUrl = `https://livepeer.studio/api/whip/${encodeURIComponent(streamKey)}`
-  const res = await fetch(whipUrl, {
+  // Use server-side proxy endpoint to bypass CORS and include Livepeer bearer authorization
+  const proxyUrl = `/api/live/whip?streamKey=${encodeURIComponent(streamKey)}`
+  const res = await fetch(proxyUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/sdp'
@@ -28,8 +29,12 @@ export async function startWhipStream(
   })
 
   if (!res.ok) {
-    const errText = await res.text()
-    throw new Error(`Browser Live Stream connection failed (${res.status}): ${errText || res.statusText}`)
+    let errText = res.statusText
+    try {
+      const json = await res.json()
+      if (json.error) errText = json.error
+    } catch {}
+    throw new Error(`Browser Live Stream connection failed (${res.status}): ${errText}`)
   }
 
   const answerSdp = await res.text()
