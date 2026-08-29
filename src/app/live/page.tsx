@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import AppShell from '@/components/AppShell'
 import { Card, Button, PlatformChip, StatusPill } from '@/components/ui'
-import { Camera, Radio, Copy, Eye, EyeOff, AlertTriangle, AlertCircle, Film, Monitor, Mic, MicOff, Video, VideoOff } from 'lucide-react'
+import { Camera, Radio, AlertTriangle, AlertCircle, Film, Monitor, Mic, MicOff, Video, VideoOff } from 'lucide-react'
 import { PLATFORM_CONFIG, PlatformKey } from '@/lib/platform-connectors'
 import { startWhipStream, stopWhipStream } from '@/lib/whip-streamer'
 
@@ -29,13 +29,12 @@ function LiveStudioContent() {
   const preselectedVideoId = searchParams.get('videoId')
 
   const [isConfigured, setIsConfigured] = useState(false)
-  const [sourceType, setSourceType] = useState<'BROWSER' | 'ENCODER' | 'PRERECORDED'>('BROWSER')
+  const [sourceType, setSourceType] = useState<'BROWSER' | 'PRERECORDED'>('BROWSER')
   const [browserMode, setBrowserMode] = useState<'WEBCAM' | 'SCREENSHARE'>('WEBCAM')
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [selected, setSelected] = useState<string[]>([])
-  const [showKey, setShowKey] = useState(false)
   const [connectedDestinations, setConnectedDestinations] = useState<Destination[]>([])
   const [userVideos, setUserVideos] = useState<VideoItem[]>([])
   const [selectedVideoId, setSelectedVideoId] = useState<string>(preselectedVideoId || '')
@@ -55,8 +54,6 @@ function LiveStudioContent() {
   const [streamId, setStreamId] = useState<string | null>(null)
   const [status, setStatus] = useState<'IDLE' | 'STARTING' | 'LIVE' | 'STOPPING' | 'ENDED' | 'ERROR'>('IDLE')
   const [destStatuses, setDestStatuses] = useState<Record<string, { status: string; errorMessage?: string }>>({})
-  const [serverUrl, setServerUrl] = useState('rtmp://ingest.videostreamhub.app/live')
-  const [streamKey, setStreamKey] = useState('vsh_live_9f2c7a1e4b8d')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [workerNotice, setWorkerNotice] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -92,10 +89,8 @@ function LiveStudioContent() {
           setStreamId(data.stream._id || data.stream.id)
           setTitle(data.stream.title || '')
           setDescription(data.stream.description || '')
-          if (data.stream.sourceType) setSourceType(data.stream.sourceType)
+          if (data.stream.sourceType === 'PRERECORDED') setSourceType('PRERECORDED')
           if (data.stream.videoId) setSelectedVideoId(data.stream.videoId)
-          if (data.stream.rtmpIngestUrl) setServerUrl(data.stream.rtmpIngestUrl)
-          if (data.stream.streamKey) setStreamKey(data.stream.streamKey)
           setStatus(data.stream.status || 'IDLE')
 
           if (data.stream.destinations) {
@@ -176,7 +171,7 @@ function LiveStudioContent() {
         }
         await enumerateDevices()
       } catch (err) {
-        // User denied camera/screen share permission or no devices
+        // User hasn't granted permissions yet or canceled dialog
       }
     }
 
@@ -272,6 +267,25 @@ function LiveStudioContent() {
     setWorkerNotice(null)
 
     try {
+      // If BROWSER mode and no media stream acquired yet, prompt for permission dynamically now
+      if (sourceType === 'BROWSER' && (!mediaStreamRef.current || !mediaStreamRef.current.active)) {
+        try {
+          if (browserMode === 'SCREENSHARE') {
+            mediaStreamRef.current = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+          } else {
+            mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({
+              video: selectedCamera ? { deviceId: { exact: selectedCamera } } : true,
+              audio: selectedMic ? { deviceId: { exact: selectedMic } } : true
+            })
+          }
+          if (previewVideoRef.current && mediaStreamRef.current) {
+            previewVideoRef.current.srcObject = mediaStreamRef.current
+          }
+        } catch (permErr: any) {
+          throw new Error('Camera/Microphone permission was denied. Please allow access in your browser settings to go live.')
+        }
+      }
+
       // 1. Create stream & configure destinations
       const createRes = await fetch('/api/live', {
         method: 'POST',
@@ -293,8 +307,6 @@ function LiveStudioContent() {
       const newStreamId = createData.stream.id || createData.stream._id
       const currentStreamKey = createData.stream.streamKey
       setStreamId(newStreamId)
-      if (createData.stream.rtmpIngestUrl) setServerUrl(createData.stream.rtmpIngestUrl)
-      if (currentStreamKey) setStreamKey(currentStreamKey)
 
       // 2. Start stream on server & YouTube
       const startRes = await fetch('/api/live/start', {
@@ -373,7 +385,7 @@ function LiveStudioContent() {
   return (
     <AppShell>
       <h1 className="text-2xl font-bold text-ink-800">Live Studio</h1>
-      <p className="mt-1 text-sm text-slate-500">Multistream live broadcasts from your browser camera/screenshare, OBS encoder, or prerecorded video library.</p>
+      <p className="mt-1 text-sm text-slate-500">Multistream live broadcasts from your browser camera/screen share or prerecorded video library.</p>
 
       {!isConfigured && (
         <Card className="mt-6 flex items-start gap-3 !border-amber-200 !bg-amber-50">
@@ -395,12 +407,11 @@ function LiveStudioContent() {
       )}
 
       {workerNotice && (
-        <Card className="mt-4 flex items-start gap-3 !border-amber-200 !bg-amber-50 text-amber-800">
-          <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-600" />
+        <Card className="mt-4 flex items-start gap-3 !border-blue-200 !bg-blue-50 text-blue-800">
+          <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-blue-600" />
           <div>
-            <p className="text-sm font-semibold">Serverless Environment Notice</p>
+            <p className="text-sm font-semibold">Background Worker Info</p>
             <p className="mt-0.5 text-xs">{workerNotice}</p>
-            <p className="mt-1 text-xs font-mono text-amber-900 bg-white/60 p-1.5 rounded">npm run worker</p>
           </div>
         </Card>
       )}
@@ -416,14 +427,7 @@ function LiveStudioContent() {
                 disabled={status === 'LIVE'}
                 className={`focus-ring flex-1 rounded-lg py-2 text-center transition-colors ${sourceType === 'BROWSER' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
               >
-                Browser (Camera / Screen)
-              </button>
-              <button
-                onClick={() => setSourceType('ENCODER')}
-                disabled={status === 'LIVE'}
-                className={`focus-ring flex-1 rounded-lg py-2 text-center transition-colors ${sourceType === 'ENCODER' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
-              >
-                OBS / External Encoder
+                Browser (Camera / Screen Share)
               </button>
               <button
                 onClick={() => setSourceType('PRERECORDED')}
@@ -449,7 +453,7 @@ function LiveStudioContent() {
                 {!mediaStreamRef.current && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/50 bg-ink-900">
                     <Camera size={32} />
-                    <p className="text-sm">Grant browser camera/screen permissions to enable live preview.</p>
+                    <p className="text-sm">Click "Start stream" to grant camera/screen permissions and go live.</p>
                   </div>
                 )}
                 {status === 'LIVE' && (
@@ -497,7 +501,7 @@ function LiveStudioContent() {
                   </div>
                 </div>
 
-                {browserMode === 'WEBCAM' && (
+                {browserMode === 'WEBCAM' && cameras.length > 0 && (
                   <div className="grid gap-3 sm:grid-cols-2 text-xs">
                     <div>
                       <label className="mb-1 block font-medium text-slate-500">Camera</label>
@@ -568,17 +572,6 @@ function LiveStudioContent() {
                   )}
                 </div>
               )}
-            </Card>
-          )}
-
-          {sourceType === 'ENCODER' && (
-            <Card className="!p-0 overflow-hidden">
-              <div className="flex aspect-video items-center justify-center bg-ink-900">
-                <div className="flex flex-col items-center gap-2 text-white/50">
-                  <Camera size={32} />
-                  <p className="text-sm">OBS / External Encoder input ready</p>
-                </div>
-              </div>
             </Card>
           )}
 
@@ -654,32 +647,6 @@ function LiveStudioContent() {
               </div>
             )}
           </Card>
-
-          {sourceType === 'ENCODER' && (
-            <Card>
-              <h2 className="mb-1 text-sm font-semibold text-ink-800">Use OBS instead</h2>
-              <p className="mb-3 text-xs text-slate-500">Point any encoder at this server and key.</p>
-              <div className="space-y-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-400">Server URL</label>
-                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-500">
-                    <span className="truncate">{serverUrl}</span>
-                    <button onClick={() => navigator.clipboard?.writeText(serverUrl)} className="ml-auto text-slate-400 hover:text-ink-800"><Copy size={13} /></button>
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-400">Stream key</label>
-                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-500">
-                    <span className="truncate">{showKey ? streamKey : '••••••••••••••••'}</span>
-                    <button onClick={() => setShowKey((s) => !s)} className="ml-auto text-slate-400 hover:text-ink-800">
-                      {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
-                    </button>
-                    <button onClick={() => navigator.clipboard?.writeText(streamKey)} className="text-slate-400 hover:text-ink-800"><Copy size={13} /></button>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          )}
         </div>
       </div>
     </AppShell>

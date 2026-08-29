@@ -29,41 +29,56 @@ export async function POST(req: Request) {
   }
   baseUrls.push('https://livepeer.studio/api', 'https://livepeer.com/api')
 
+  // Livepeer WHIP URL candidate patterns:
+  // 1. /stream/{streamKey}/whip
+  // 2. /whip/{streamKey}
+  const urlPatterns = [
+    (base: string, key: string) => `${base}/stream/${key}/whip`,
+    (base: string, key: string) => `${base}/whip/${key}`
+  ]
+
   let lastErrText = ''
 
   for (const base of baseUrls) {
     const formattedBase = base.replace(/\/+$/, '')
-    const whipTargetUrl = `${formattedBase}/whip/${encodeURIComponent(streamKey)}`
 
-    try {
-      const res = await fetch(whipTargetUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/sdp'
-        },
-        body: sdpOffer,
-        signal: AbortSignal.timeout(10000)
-      })
+    for (const pattern of urlPatterns) {
+      const whipTargetUrl = pattern(formattedBase, encodeURIComponent(streamKey))
 
-      if (res.ok || res.status === 201) {
-        const answerSdp = await res.text()
-        return new Response(answerSdp, {
-          status: 200,
+      try {
+        const res = await fetch(whipTargetUrl, {
+          method: 'POST',
           headers: {
+            Authorization: `Bearer ${apiKey.trim()}`,
             'Content-Type': 'application/sdp'
-          }
+          },
+          body: sdpOffer,
+          signal: AbortSignal.timeout(10000)
         })
-      }
 
-      lastErrText = await res.text()
-    } catch (err: any) {
-      lastErrText = err.message
+        if (res.ok || res.status === 201) {
+          const answerSdp = await res.text()
+          return new Response(answerSdp, {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/sdp'
+            }
+          })
+        }
+
+        const errTxt = await res.text()
+        // If it's not a 404, capture the actual API error
+        if (res.status !== 404) {
+          lastErrText = errTxt
+        }
+      } catch (err: any) {
+        lastErrText = err.message
+      }
     }
   }
 
   return NextResponse.json(
-    { error: `WHIP proxy connection failed: ${lastErrText || 'Livepeer API unreachable'}` },
+    { error: `WHIP proxy connection failed: ${lastErrText || 'Livepeer API WHIP endpoint not found or unreachable'}` },
     { status: 502 }
   )
 }
