@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import AppShell from '@/components/AppShell'
 import { Card, Button, PlatformChip, StatusPill } from '@/components/ui'
-import { Camera, Radio, AlertTriangle, AlertCircle, Film, Monitor, Mic, MicOff, Video, VideoOff } from 'lucide-react'
+import { Camera, Radio, AlertTriangle, AlertCircle, Film, Mic, MicOff, Video, VideoOff } from 'lucide-react'
 import { PLATFORM_CONFIG, PlatformKey } from '@/lib/platform-connectors'
 import { startWhipStream, stopWhipStream } from '@/lib/whip-streamer'
 
@@ -384,269 +384,273 @@ function LiveStudioContent() {
 
   return (
     <AppShell>
-      <h1 className="text-2xl font-bold text-ink-800">Live Studio</h1>
-      <p className="mt-1 text-sm text-slate-500">Multistream live broadcasts from your browser camera/screen share or prerecorded video library.</p>
+      <div className="w-full max-w-full min-w-0 overflow-x-hidden">
+        <h1 className="text-2xl font-bold text-ink-800">Live Studio</h1>
+        <p className="mt-1 text-sm text-slate-500">Multistream live broadcasts from your browser camera/screen share or prerecorded video library.</p>
 
-      {!isConfigured && (
-        <Card className="mt-6 flex items-start gap-3 !border-amber-200 !bg-amber-50">
-          <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-600" />
-          <div>
-            <p className="text-sm font-semibold text-amber-700">Streaming service not configured</p>
-            <p className="mt-0.5 text-sm text-amber-700/80">
-              Add <code className="rounded bg-white/60 px-1">STREAM_PROVIDER_API_KEY</code> to <code className="rounded bg-white/60 px-1">.env</code> to enable live streaming.
-            </p>
-          </div>
-        </Card>
-      )}
-
-      {errorMsg && (
-        <Card className="mt-4 flex items-center gap-3 !border-red-200 !bg-red-50 text-red-700">
-          <AlertCircle size={18} className="flex-shrink-0 text-red-600" />
-          <p className="text-sm">{errorMsg}</p>
-        </Card>
-      )}
-
-      {workerNotice && (
-        <Card className="mt-4 flex items-start gap-3 !border-blue-200 !bg-blue-50 text-blue-800">
-          <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-blue-600" />
-          <div>
-            <p className="text-sm font-semibold">Background Worker Info</p>
-            <p className="mt-0.5 text-xs">{workerNotice}</p>
-          </div>
-        </Card>
-      )}
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
-          {/* Source Mode Selector */}
-          <Card>
-            <h2 className="mb-3 text-sm font-semibold text-ink-800">Stream Source</h2>
-            <div className="flex rounded-xl bg-slate-100 p-1 text-sm font-medium">
-              <button
-                onClick={() => setSourceType('BROWSER')}
-                disabled={status === 'LIVE'}
-                className={`focus-ring flex-1 rounded-lg py-2 text-center transition-colors ${sourceType === 'BROWSER' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
-              >
-                Browser (Camera / Screen Share)
-              </button>
-              <button
-                onClick={() => setSourceType('PRERECORDED')}
-                disabled={status === 'LIVE'}
-                className={`focus-ring flex-1 rounded-lg py-2 text-center transition-colors ${sourceType === 'PRERECORDED' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
-              >
-                Prerecorded Video
-              </button>
+        {!isConfigured && (
+          <Card className="mt-6 flex items-start gap-3 !border-amber-200 !bg-amber-50">
+            <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-amber-700">Streaming service not configured</p>
+              <p className="mt-0.5 text-sm text-amber-700/80 break-words">
+                Add <code className="rounded bg-white/60 px-1">STREAM_PROVIDER_API_KEY</code> to <code className="rounded bg-white/60 px-1">.env</code> to enable live streaming.
+              </p>
             </div>
           </Card>
+        )}
 
-          {/* Source Controls */}
-          {sourceType === 'BROWSER' && (
-            <Card className="!p-0 overflow-hidden relative">
-              <div className="relative flex aspect-video items-center justify-center bg-ink-900">
-                <video
-                  ref={previewVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="h-full w-full object-cover"
-                />
-                {!mediaStreamRef.current && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/50 bg-ink-900">
-                    <Camera size={32} />
-                    <p className="text-sm">Click "Start stream" to grant camera/screen permissions and go live.</p>
-                  </div>
-                )}
-                {status === 'LIVE' && (
-                  <div className="absolute top-3 left-3 flex items-center gap-2 rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white animate-pulse">
-                    <span className="h-2 w-2 rounded-full bg-white" /> LIVE (WebRTC)
-                  </div>
-                )}
-              </div>
+        {errorMsg && (
+          <Card className="mt-4 flex items-center gap-3 !border-red-200 !bg-red-50 text-red-700">
+            <AlertCircle size={18} className="flex-shrink-0 text-red-600" />
+            <p className="text-sm break-words">{errorMsg}</p>
+          </Card>
+        )}
 
-              {/* Browser Media Controls */}
-              <div className="p-4 space-y-3 bg-white">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex rounded-lg bg-slate-100 p-1 text-xs font-medium">
-                    <button
-                      onClick={() => setBrowserMode('WEBCAM')}
-                      disabled={status === 'LIVE'}
-                      className={`px-3 py-1.5 rounded-md transition-colors ${browserMode === 'WEBCAM' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
-                    >
-                      Camera & Mic
-                    </button>
-                    <button
-                      onClick={() => setBrowserMode('SCREENSHARE')}
-                      disabled={status === 'LIVE'}
-                      className={`px-3 py-1.5 rounded-md transition-colors ${browserMode === 'SCREENSHARE' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
-                    >
-                      Screen Share
-                    </button>
-                  </div>
+        {workerNotice && (
+          <Card className="mt-4 flex items-start gap-3 !border-blue-200 !bg-blue-50 text-blue-800">
+            <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-blue-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">Background Worker Info</p>
+              <p className="mt-0.5 text-xs break-words">{workerNotice}</p>
+            </div>
+          </Card>
+        )}
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={toggleMic}
-                      className={`p-2 rounded-xl border text-slate-600 transition-colors ${micMuted ? 'bg-red-50 border-red-200 text-red-600' : 'border-slate-200 hover:bg-slate-50'}`}
-                      title={micMuted ? 'Unmute Microphone' : 'Mute Microphone'}
-                    >
-                      {micMuted ? <MicOff size={16} /> : <Mic size={16} />}
-                    </button>
-                    <button
-                      onClick={toggleVideo}
-                      className={`p-2 rounded-xl border text-slate-600 transition-colors ${videoDisabled ? 'bg-red-50 border-red-200 text-red-600' : 'border-slate-200 hover:bg-slate-50'}`}
-                      title={videoDisabled ? 'Enable Video' : 'Disable Video'}
-                    >
-                      {videoDisabled ? <VideoOff size={16} /> : <Video size={16} />}
-                    </button>
-                  </div>
-                </div>
-
-                {browserMode === 'WEBCAM' && cameras.length > 0 && (
-                  <div className="grid gap-3 sm:grid-cols-2 text-xs">
-                    <div>
-                      <label className="mb-1 block font-medium text-slate-500">Camera</label>
-                      <select
-                        value={selectedCamera}
-                        onChange={(e) => setSelectedCamera(e.target.value)}
-                        disabled={status === 'LIVE'}
-                        className="focus-ring w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700"
-                      >
-                        {cameras.map((c) => (
-                          <option key={c.deviceId} value={c.deviceId}>
-                            {c.label || `Camera ${c.deviceId.slice(0, 5)}`}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="mb-1 block font-medium text-slate-500">Microphone</label>
-                      <select
-                        value={selectedMic}
-                        onChange={(e) => setSelectedMic(e.target.value)}
-                        disabled={status === 'LIVE'}
-                        className="focus-ring w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700"
-                      >
-                        {microphones.map((m) => (
-                          <option key={m.deviceId} value={m.deviceId}>
-                            {m.label || `Microphone ${m.deviceId.slice(0, 5)}`}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
+        <div className="mt-6 grid gap-6 lg:grid-cols-3 min-w-0 max-w-full">
+          <div className="space-y-6 lg:col-span-2 min-w-0 max-w-full">
+            {/* Source Mode Selector */}
+            <Card className="min-w-0 max-w-full">
+              <h2 className="mb-3 text-sm font-semibold text-ink-800">Stream Source</h2>
+              <div className="flex rounded-xl bg-slate-100 p-1 text-xs sm:text-sm font-medium">
+                <button
+                  onClick={() => setSourceType('BROWSER')}
+                  disabled={status === 'LIVE'}
+                  className={`focus-ring flex-1 rounded-lg py-2 px-2 text-center transition-colors truncate ${sourceType === 'BROWSER' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
+                >
+                  Browser (Camera / Screen)
+                </button>
+                <button
+                  onClick={() => setSourceType('PRERECORDED')}
+                  disabled={status === 'LIVE'}
+                  className={`focus-ring flex-1 rounded-lg py-2 px-2 text-center transition-colors truncate ${sourceType === 'PRERECORDED' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
+                >
+                  Prerecorded Video
+                </button>
               </div>
             </Card>
-          )}
 
-          {sourceType === 'PRERECORDED' && (
-            <Card>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-ink-800 flex items-center gap-2">
-                  <Film size={16} className="text-teal-600" /> Select Video to Stream
-                </h2>
-              </div>
-              {userVideos.length === 0 ? (
-                <p className="text-sm text-slate-500">No uploaded videos found in library. Upload a video first to stream it live.</p>
-              ) : (
-                <div className="space-y-3">
-                  <select
-                    value={selectedVideoId}
-                    onChange={(e) => handleSelectVideo(e.target.value)}
-                    disabled={status === 'LIVE'}
-                    className="focus-ring w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm"
-                  >
-                    <option value="">-- Choose a video from your library --</option>
-                    {userVideos.map((v) => (
-                      <option key={v.id || v._id} value={v.id || v._id}>
-                        {v.title}
-                      </option>
-                    ))}
-                  </select>
-
-                  {selectedVideo && (
-                    <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3.5 text-xs text-slate-600">
-                      <p className="font-semibold text-ink-800">{selectedVideo.title}</p>
-                      <p className="mt-1 text-slate-400">Stream Source URL: <span className="truncate block font-mono text-[11px] text-teal-700">{selectedVideo.originalFileUrl}</span></p>
+            {/* Source Controls */}
+            {sourceType === 'BROWSER' && (
+              <Card className="!p-0 overflow-hidden relative min-w-0 max-w-full">
+                <div className="relative flex aspect-video items-center justify-center bg-ink-900 w-full">
+                  <video
+                    ref={previewVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="h-full w-full object-cover"
+                  />
+                  {!mediaStreamRef.current && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/50 bg-ink-900 p-4 text-center">
+                      <Camera size={32} />
+                      <p className="text-xs sm:text-sm">Click "Start stream" to grant camera/screen permissions and go live.</p>
+                    </div>
+                  )}
+                  {status === 'LIVE' && (
+                    <div className="absolute top-3 left-3 flex items-center gap-2 rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white animate-pulse">
+                      <span className="h-2 w-2 rounded-full bg-white" /> LIVE (WebRTC)
                     </div>
                   )}
                 </div>
-              )}
-            </Card>
-          )}
 
-          <Card>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-slate-500">
-                <StatusPill status={status} label={status === 'LIVE' ? 'Live' : status === 'STARTING' ? 'Starting' : status === 'ENDED' ? 'Ended' : 'Idle'} />
-                <span>{formatTime(elapsedSeconds)}</span>
-              </div>
-              {status === 'LIVE' ? (
-                <Button variant="outline" onClick={handleStopStream} disabled={isSubmitting} className="gap-2 border-red-200 text-red-600 hover:bg-red-50">
-                  <Radio size={15} /> Stop stream
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleStartStream}
-                  disabled={!isConfigured || selected.length === 0 || isSubmitting || (sourceType === 'PRERECORDED' && !selectedVideoId)}
-                  className="gap-2"
-                >
-                  <Radio size={15} /> {isSubmitting ? 'Starting...' : 'Start stream'}
-                </Button>
-              )}
-            </div>
-          </Card>
+                {/* Browser Media Controls */}
+                <div className="p-4 space-y-3 bg-white min-w-0 max-w-full">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex rounded-lg bg-slate-100 p-1 text-xs font-medium max-w-full">
+                      <button
+                        onClick={() => setBrowserMode('WEBCAM')}
+                        disabled={status === 'LIVE'}
+                        className={`px-3 py-1.5 rounded-md transition-colors ${browserMode === 'WEBCAM' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
+                      >
+                        Camera & Mic
+                      </button>
+                      <button
+                        onClick={() => setBrowserMode('SCREENSHARE')}
+                        disabled={status === 'LIVE'}
+                        className={`px-3 py-1.5 rounded-md transition-colors ${browserMode === 'SCREENSHARE' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
+                      >
+                        Screen Share
+                      </button>
+                    </div>
 
-          <Card>
-            <h2 className="mb-3 text-sm font-semibold text-ink-800">Destination status</h2>
-            {selected.length === 0 ? (
-              <p className="text-sm text-slate-500">Select destinations on the right to see their status here once you're live.</p>
-            ) : (
-              <div className="space-y-2">
-                {selected.map((id) => {
-                  const d = connectedDestinations.find((c) => c.id === id)
-                  const info = destStatuses[id]
-                  const dStatus = info?.status ? (info.status.toUpperCase() as any) : status === 'LIVE' ? 'LIVE' : 'IDLE'
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={toggleMic}
+                        className={`p-2 rounded-xl border text-slate-600 transition-colors ${micMuted ? 'bg-red-50 border-red-200 text-red-600' : 'border-slate-200 hover:bg-slate-50'}`}
+                        title={micMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+                      >
+                        {micMuted ? <MicOff size={16} /> : <Mic size={16} />}
+                      </button>
+                      <button
+                        onClick={toggleVideo}
+                        className={`p-2 rounded-xl border text-slate-600 transition-colors ${videoDisabled ? 'bg-red-50 border-red-200 text-red-600' : 'border-slate-200 hover:bg-slate-50'}`}
+                        title={videoDisabled ? 'Enable Video' : 'Disable Video'}
+                      >
+                        {videoDisabled ? <VideoOff size={16} /> : <Video size={16} />}
+                      </button>
+                    </div>
+                  </div>
 
-                  return (
-                    <div key={id} className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2.5">
-                      <PlatformChip platform={d?.platform || 'CUSTOM_RTMP'} />
-                      <div className="flex items-center gap-2">
-                        {info?.errorMessage && <span className="text-xs text-red-500">{info.errorMessage}</span>}
-                        <StatusPill status={dStatus} label={dStatus === 'LIVE' ? 'Live' : dStatus === 'PENDING' ? 'Pending' : dStatus === 'ERROR' ? 'Error' : 'Not started'} />
+                  {browserMode === 'WEBCAM' && cameras.length > 0 && (
+                    <div className="grid gap-3 sm:grid-cols-2 text-xs min-w-0 max-w-full">
+                      <div className="min-w-0">
+                        <label className="mb-1 block font-medium text-slate-500">Camera</label>
+                        <select
+                          value={selectedCamera}
+                          onChange={(e) => setSelectedCamera(e.target.value)}
+                          disabled={status === 'LIVE'}
+                          className="focus-ring w-full truncate rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700"
+                        >
+                          {cameras.map((c) => (
+                            <option key={c.deviceId} value={c.deviceId}>
+                              {c.label || `Camera ${c.deviceId.slice(0, 5)}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="min-w-0">
+                        <label className="mb-1 block font-medium text-slate-500">Microphone</label>
+                        <select
+                          value={selectedMic}
+                          onChange={(e) => setSelectedMic(e.target.value)}
+                          disabled={status === 'LIVE'}
+                          className="focus-ring w-full truncate rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700"
+                        >
+                          {microphones.map((m) => (
+                            <option key={m.deviceId} value={m.deviceId}>
+                              {m.label || `Microphone ${m.deviceId.slice(0, 5)}`}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
+                  )}
+                </div>
+              </Card>
             )}
-          </Card>
-        </div>
 
-        <div className="space-y-6">
-          <Card>
-            <h2 className="mb-3 text-sm font-semibold text-ink-800">Stream details</h2>
-            <div className="space-y-3">
-              <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={status === 'LIVE'} placeholder="Stream title" className="focus-ring w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm" />
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={status === 'LIVE'} placeholder="Description (optional)" rows={3} className="focus-ring w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm" />
-            </div>
-          </Card>
+            {sourceType === 'PRERECORDED' && (
+              <Card className="min-w-0 max-w-full">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-ink-800 flex items-center gap-2">
+                    <Film size={16} className="text-teal-600" /> Select Video to Stream
+                  </h2>
+                </div>
+                {userVideos.length === 0 ? (
+                  <p className="text-sm text-slate-500">No uploaded videos found in library. Upload a video first to stream it live.</p>
+                ) : (
+                  <div className="space-y-3 min-w-0 max-w-full">
+                    <select
+                      value={selectedVideoId}
+                      onChange={(e) => handleSelectVideo(e.target.value)}
+                      disabled={status === 'LIVE'}
+                      className="focus-ring w-full truncate rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm max-w-full"
+                    >
+                      <option value="">-- Choose a video from your library --</option>
+                      {userVideos.map((v) => (
+                        <option key={v.id || v._id} value={v.id || v._id}>
+                          {v.title}
+                        </option>
+                      ))}
+                    </select>
 
-          <Card>
-            <h2 className="mb-3 text-sm font-semibold text-ink-800">Destinations</h2>
-            {connectedDestinations.length === 0 ? (
-              <p className="text-sm text-slate-500">No connected platforms support live streaming yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {connectedDestinations.map((d) => (
-                  <label key={d.id} className="flex cursor-pointer items-center justify-between rounded-xl border border-slate-100 px-3 py-2.5">
-                    <PlatformChip platform={d.platform} />
-                    <input type="checkbox" checked={selected.includes(d.id)} disabled={status === 'LIVE'} onChange={() => toggle(d.id)} className="h-4 w-4 accent-teal-600" />
-                  </label>
-                ))}
-              </div>
+                    {selectedVideo && (
+                      <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3.5 text-xs text-slate-600 min-w-0 max-w-full overflow-hidden">
+                        <p className="font-semibold text-ink-800 truncate">{selectedVideo.title}</p>
+                        <p className="mt-1 text-slate-400 font-mono text-[11px] truncate text-teal-700 break-all">
+                          {selectedVideo.originalFileUrl}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
             )}
-          </Card>
+
+            <Card className="min-w-0 max-w-full">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                  <StatusPill status={status} label={status === 'LIVE' ? 'Live' : status === 'STARTING' ? 'Starting' : status === 'ENDED' ? 'Ended' : 'Idle'} />
+                  <span>{formatTime(elapsedSeconds)}</span>
+                </div>
+                {status === 'LIVE' ? (
+                  <Button variant="outline" onClick={handleStopStream} disabled={isSubmitting} className="gap-2 border-red-200 text-red-600 hover:bg-red-50">
+                    <Radio size={15} /> Stop stream
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleStartStream}
+                    disabled={!isConfigured || selected.length === 0 || isSubmitting || (sourceType === 'PRERECORDED' && !selectedVideoId)}
+                    className="gap-2"
+                  >
+                    <Radio size={15} /> {isSubmitting ? 'Starting...' : 'Start stream'}
+                  </Button>
+                )}
+              </div>
+            </Card>
+
+            <Card className="min-w-0 max-w-full">
+              <h2 className="mb-3 text-sm font-semibold text-ink-800">Destination status</h2>
+              {selected.length === 0 ? (
+                <p className="text-sm text-slate-500">Select destinations on the right to see their status here once you're live.</p>
+              ) : (
+                <div className="space-y-2">
+                  {selected.map((id) => {
+                    const d = connectedDestinations.find((c) => c.id === id)
+                    const info = destStatuses[id]
+                    const dStatus = info?.status ? (info.status.toUpperCase() as any) : status === 'LIVE' ? 'LIVE' : 'IDLE'
+
+                    return (
+                      <div key={id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 px-3 py-2.5">
+                        <PlatformChip platform={d?.platform || 'CUSTOM_RTMP'} />
+                        <div className="flex items-center gap-2">
+                          {info?.errorMessage && <span className="text-xs text-red-500 truncate max-w-xs">{info.errorMessage}</span>}
+                          <StatusPill status={dStatus} label={dStatus === 'LIVE' ? 'Live' : dStatus === 'PENDING' ? 'Pending' : dStatus === 'ERROR' ? 'Error' : 'Not started'} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </Card>
+          </div>
+
+          <div className="space-y-6 min-w-0 max-w-full">
+            <Card className="min-w-0 max-w-full">
+              <h2 className="mb-3 text-sm font-semibold text-ink-800">Stream details</h2>
+              <div className="space-y-3 min-w-0 max-w-full">
+                <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={status === 'LIVE'} placeholder="Stream title" className="focus-ring w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm" />
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={status === 'LIVE'} placeholder="Description (optional)" rows={3} className="focus-ring w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm" />
+              </div>
+            </Card>
+
+            <Card className="min-w-0 max-w-full">
+              <h2 className="mb-3 text-sm font-semibold text-ink-800">Destinations</h2>
+              {connectedDestinations.length === 0 ? (
+                <p className="text-sm text-slate-500">No connected platforms support live streaming yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {connectedDestinations.map((d) => (
+                    <label key={d.id} className="flex cursor-pointer items-center justify-between rounded-xl border border-slate-100 px-3 py-2.5">
+                      <PlatformChip platform={d.platform} />
+                      <input type="checkbox" checked={selected.includes(d.id)} disabled={status === 'LIVE'} onChange={() => toggle(d.id)} className="h-4 w-4 accent-teal-600" />
+                    </label>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
         </div>
       </div>
     </AppShell>

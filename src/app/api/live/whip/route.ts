@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
+import { connectToDatabase } from '@/lib/mongodb'
+import LiveStream from '@/lib/models/LiveStream'
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions)
@@ -12,8 +14,8 @@ export async function POST(req: Request) {
   }
 
   const { searchParams } = new URL(req.url)
-  const streamKey = searchParams.get('streamKey')
-  if (!streamKey) {
+  const keyParam = searchParams.get('streamKey') || searchParams.get('providerStreamId')
+  if (!keyParam) {
     return NextResponse.json({ error: 'streamKey parameter is required.' }, { status: 400 })
   }
 
@@ -22,6 +24,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'SDP offer body is required.' }, { status: 400 })
   }
 
+  await connectToDatabase()
+
+  // Find stream in database to resolve both providerStreamId and streamKey
+  const liveStreamDoc = await LiveStream.findOne({
+    userId: session.user.id,
+    $or: [{ streamKey: keyParam }, { providerStreamId: keyParam }, { _id: keyParam }]
+  }).select('+streamKey')
+
+  const candidateKeys = Array.from(
+    new Set(
+      [
+        keyParam,
+        liveStreamDoc?.providerStreamId,
+        liveStreamDoc?.streamKey
+      ].filter(Boolean) as string[]
+    )
+  )
+
   const rawCustomUrl = process.env.STREAM_PROVIDER_API_URL
   const baseUrls: string[] = []
   if (rawCustomUrl && rawCustomUrl.trim() !== '') {
@@ -29,50 +49,46 @@ export async function POST(req: Request) {
   }
   baseUrls.push('https://livepeer.studio/api', 'https://livepeer.com/api')
 
-  // Livepeer WHIP URL candidate patterns:
-  // 1. /stream/{streamKey}/whip
-  // 2. /whip/{streamKey}
-  const urlPatterns = [
-    (base: string, key: string) => `${base}/stream/${key}/whip`,
-    (base: string, key: string) => `${base}/whip/${key}`
-  ]
-
   let lastErrText = ''
 
   for (const base of baseUrls) {
     const formattedBase = base.replace(/\/+$/, '')
 
-    for (const pattern of urlPatterns) {
-      const whipTargetUrl = pattern(formattedBase, encodeURIComponent(streamKey))
+    for (const key of candidateKeys) {
+      const urlCandidates = [
+        `${formattedBase}/stream/${encodeURIComponent(key)}/whip`,
+        `${formattedBase}/whip/${encodeURIComponent(key)}`
+      ]
 
-      try {
-        const res = await fetch(whipTargetUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey.trim()}`,
-            'Content-Type': 'application/sdp'
-          },
-          body: sdpOffer,
-          signal: AbortSignal.timeout(10000)
-        })
-
-        if (res.ok || res.status === 201) {
-          const answerSdp = await res.text()
-          return new Response(answerSdp, {
-            status: 200,
+      for (const whipTargetUrl of urlCandidates) {
+        try {
+          const res = await fetch(whipTargetUrl, {
+            method: 'POST',
             headers: {
+              Authorization: `Bearer ${apiKey.trim()}`,
               'Content-Type': 'application/sdp'
-            }
+            },
+            body: sdpOffer,
+            signal: AbortSignal.timeout(10000)
           })
-        }
 
-        const errTxt = await res.text()
-        // If it's not a 404, capture the actual API error
-        if (res.status !== 404) {
-          lastErrText = errTxt
+          if (res.ok || res.status === 201) {
+            const answerSdp = await res.text()
+            return new Response(answerSdp, {
+              status: 200,
+              headers: {
+                'Content-Type': 'application/sdp'
+              }
+            })
+          }
+
+          const errTxt = await res.text()
+          if (res.status !== 404) {
+            lastErrText = errTxt
+          }
+        } catch (err: any) {
+          lastErrText = err.message
         }
-      } catch (err: any) {
-        lastErrText = err.message
       }
     }
   }
