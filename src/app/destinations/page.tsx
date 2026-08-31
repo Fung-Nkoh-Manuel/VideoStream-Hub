@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import AppShell from '@/components/AppShell'
-import { Card, Button, SectionHeading, EmptyState } from '@/components/ui'
-import { PlatformIcon, PLATFORM_CONFIG, PlatformKey } from '@/lib/platform-connectors'
+import { Card, Button, SectionHeading, EmptyState, PlatformIcon } from '@/components/ui'
+import { PLATFORM_CONFIG, PlatformKey } from '@/lib/platform-connectors'
 import { Plus, Users, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react'
 
 interface DestinationUI {
