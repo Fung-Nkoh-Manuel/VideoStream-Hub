@@ -58,7 +58,14 @@ export async function DELETE(req: Request) {
   await connectToDatabase()
 
   if (id) {
-    await Destination.deleteOne({ _id: id, userId: session.user.id })
+    // id could be a real MongoDB ObjectId or a platform key string used as fallback
+    const mongoose = await import('mongoose')
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      await Destination.deleteOne({ _id: id, userId: session.user.id })
+    } else {
+      // id is a platform key string (e.g. "YOUTUBE") — delete by platform instead
+      await Destination.deleteOne({ platform: id.toUpperCase(), userId: session.user.id })
+    }
   } else if (platform) {
     await Destination.deleteOne({ platform: platform.toUpperCase(), userId: session.user.id })
   } else {

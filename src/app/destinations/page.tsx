@@ -46,19 +46,15 @@ export default function DestinationsPage() {
   }
 
   const handleConnect = async (platform: PlatformKey) => {
-    if (platform === 'YOUTUBE') {
-      window.location.href = '/api/destinations/youtube/auth'
-    } else if (platform === 'FACEBOOK') {
-      window.location.href = '/api/destinations/facebook/auth'
-    } else {
-      alert(`OAuth flow for ${PLATFORM_CONFIG[platform]?.label || platform} will open here.`)
-    }
+    // Correct route: /api/destinations/[platform]/authorize
+    window.location.href = `/api/destinations/${platform.toLowerCase()}/authorize`
   }
 
   const handleDisconnect = async (id: string, platform: PlatformKey) => {
     if (!confirm(`Are you sure you want to disconnect ${PLATFORM_CONFIG[platform]?.label || platform}?`)) return
     try {
-      const res = await fetch(`/api/destinations?id=${id}`, { method: 'DELETE' })
+      // Always delete by platform to avoid CastError when id is a platform key string
+      const res = await fetch(`/api/destinations?platform=${encodeURIComponent(platform)}`, { method: 'DELETE' })
       if (res.ok) {
         await loadDestinations()
       }
