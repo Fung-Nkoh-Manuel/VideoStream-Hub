@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
+import mongoose from 'mongoose'
 import { authOptions } from '@/lib/auth'
 import { connectToDatabase } from '@/lib/mongodb'
 import LiveStream from '@/lib/models/LiveStream'
@@ -26,10 +27,20 @@ export async function POST(req: Request) {
 
   await connectToDatabase()
 
+  // Construct MongoDB $or query safely without triggering CastError on non-ObjectId string values
+  const orConditions: any[] = [
+    { streamKey: keyParam },
+    { providerStreamId: keyParam }
+  ]
+
+  if (mongoose.Types.ObjectId.isValid(keyParam)) {
+    orConditions.push({ _id: keyParam })
+  }
+
   // Find stream in database to resolve both providerStreamId and streamKey
   const liveStreamDoc = await LiveStream.findOne({
     userId: session.user.id,
-    $or: [{ streamKey: keyParam }, { providerStreamId: keyParam }, { _id: keyParam }]
+    $or: orConditions
   }).select('+streamKey')
 
   const candidateKeys = Array.from(

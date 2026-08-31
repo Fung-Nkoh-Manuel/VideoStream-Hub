@@ -266,6 +266,8 @@ function LiveStudioContent() {
     setErrorMsg(null)
     setWorkerNotice(null)
 
+    let createdStreamId: string | null = null
+
     try {
       // If BROWSER mode and no media stream acquired yet, prompt for permission dynamically now
       if (sourceType === 'BROWSER' && (!mediaStreamRef.current || !mediaStreamRef.current.active)) {
@@ -304,15 +306,15 @@ function LiveStudioContent() {
         throw new Error(createData.error || 'Failed to create live stream')
       }
 
-      const newStreamId = createData.stream.id || createData.stream._id
+      createdStreamId = createData.stream.id || createData.stream._id
       const currentStreamKey = createData.stream.streamKey
-      setStreamId(newStreamId)
+      setStreamId(createdStreamId)
 
       // 2. Start stream on server & YouTube
       const startRes = await fetch('/api/live/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ streamId: newStreamId })
+        body: JSON.stringify({ streamId: createdStreamId })
       })
 
       const startData = await startRes.json()
@@ -330,8 +332,19 @@ function LiveStudioContent() {
           throw new Error('Camera/Microphone stream is not available. Please grant permissions and try again.')
         }
 
-        const pc = await startWhipStream(mediaStreamRef.current, currentStreamKey)
-        peerConnectionRef.current = pc
+        try {
+          const pc = await startWhipStream(mediaStreamRef.current, currentStreamKey)
+          peerConnectionRef.current = pc
+        } catch (whipErr: any) {
+          if (createdStreamId) {
+            await fetch('/api/live/stop', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ streamId: createdStreamId })
+            }).catch(() => {})
+          }
+          throw whipErr
+        }
       }
 
       setStatus('LIVE')
