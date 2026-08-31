@@ -2,18 +2,22 @@
 
 import { useEffect, useState } from 'react'
 import AppShell from '@/components/AppShell'
-import { Card, SectionHeading, ConnectionLabel, PlatformIcon, Button, EmptyState } from '@/components/ui'
-import { PLATFORM_META } from '@/components/ui'
-import { PlatformKey, DestinationItem } from '@/lib/types'
-import { Plus, Settings2, Users } from 'lucide-react'
+import { Card, Button, SectionHeading, EmptyState } from '@/components/ui'
+import { PlatformIcon, PLATFORM_CONFIG, PlatformKey } from '@/lib/platform-connectors'
+import { Plus, Users, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react'
 
-const GROUPS = [{ id: 'g1', name: 'Sunday Service', memberIds: ['d1', 'd2'] }]
+interface DestinationUI {
+  id: string
+  platform: PlatformKey
+  accountName?: string
+  status: 'CONNECTED' | 'DISCONNECTED' | 'SETUP_REQUIRED'
+}
 
-const ALL_PLATFORMS: PlatformKey[] = ['YOUTUBE', 'TIKTOK', 'FACEBOOK', 'TWITCH', 'LINKEDIN', 'X', 'CUSTOM_RTMP']
+const GROUPS: Array<{ id: string; name: string; memberIds: string[] }> = []
 
 export default function DestinationsPage() {
-  const [dbDestinations, setDbDestinations] = useState<DestinationItem[]>([])
-  const [configuredMap, setConfiguredMap] = useState<Record<string, boolean>>({})
+  const [destinations, setDestinations] = useState<DestinationUI[]>([])
+  const [configuredPlatforms, setConfiguredPlatforms] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [mounted, setMounted] = useState(false)
 
@@ -22,9 +26,9 @@ export default function DestinationsPage() {
       const res = await fetch('/api/destinations')
       if (res.ok) {
         const data = await res.json()
-        setDbDestinations(data.destinations || [])
+        setDestinations(data.destinations || [])
         if (data.configuredPlatforms) {
-          setConfiguredMap(data.configuredPlatforms)
+          setConfiguredPlatforms(data.configuredPlatforms)
         }
       }
     } catch {} finally {
@@ -37,93 +41,110 @@ export default function DestinationsPage() {
     loadDestinations()
   }, [])
 
+  const isConfigured = (key: PlatformKey): boolean => {
+    return Boolean(configuredPlatforms[key])
+  }
+
   const handleConnect = async (platform: PlatformKey) => {
+    if (platform === 'YOUTUBE') {
+      window.location.href = '/api/destinations/youtube/auth'
+    } else if (platform === 'FACEBOOK') {
+      window.location.href = '/api/destinations/facebook/auth'
+    } else {
+      alert(`OAuth flow for ${PLATFORM_CONFIG[platform]?.label || platform} will open here.`)
+    }
+  }
+
+  const handleDisconnect = async (id: string, platform: PlatformKey) => {
+    if (!confirm(`Are you sure you want to disconnect ${PLATFORM_CONFIG[platform]?.label || platform}?`)) return
     try {
-      const res = await fetch('/api/destinations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform })
-      })
-      const data = await res.json()
-      if (data.nextStep) {
-        window.location.href = data.nextStep
-      } else {
+      const res = await fetch(`/api/destinations?id=${id}`, { method: 'DELETE' })
+      if (res.ok) {
         await loadDestinations()
       }
     } catch {}
   }
 
-  const handleDisconnect = async (id?: string, platform?: PlatformKey) => {
-    try {
-      const query = id ? `id=${id}` : `platform=${platform}`
-      await fetch(`/api/destinations?${query}`, { method: 'DELETE' })
-      await loadDestinations()
-    } catch {}
-  }
+  const platformCards = (Object.keys(PLATFORM_CONFIG) as PlatformKey[]).map((key) => {
+    const connected = destinations.find((d) => d.platform === key)
+    const configured = isConfigured(key)
 
-  const platformCards = ALL_PLATFORMS.map((platform) => {
-    const existing = dbDestinations.find((d) => d.platform === platform)
-    if (existing) {
-      return {
-        id: existing.id || (existing as any)._id,
-        platform,
-        accountName: existing.accountName,
-        status: existing.status
-      }
-    }
-    const configured = configuredMap[platform] ?? false
+    let status: DestinationUI['status'] = 'DISCONNECTED'
+    if (connected) status = 'CONNECTED'
+    else if (!configured) status = 'SETUP_REQUIRED'
+
     return {
-      id: platform,
-      platform,
-      accountName: null,
-      status: configured ? ('NOT_CONNECTED' as const) : ('SETUP_REQUIRED' as const)
+      id: connected?.id || key,
+      platform: key,
+      accountName: connected?.accountName,
+      status
     }
   })
 
+  function ConnectionLabel({ status }: { status: DestinationUI['status'] }) {
+    if (status === 'CONNECTED') {
+      return (
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+          <CheckCircle2 size={14} /> Connected
+        </span>
+      )
+    }
+    if (status === 'SETUP_REQUIRED') {
+      return (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+          <AlertTriangle size={14} /> Setup required
+        </span>
+      )
+    }
+    return <span className="text-xs font-medium text-slate-400">Not connected</span>
+  }
+
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-ink-800">Destinations</h1>
-          <p className="mt-1 text-sm text-slate-500">Connect the platforms you publish to. Multiple accounts per platform are supported.</p>
-        </div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-ink-800">Connected Destinations</h1>
+        <p className="mt-1 text-sm text-slate-500">Connect platforms once; VideoStream Hub handles authentication and live streaming for you.</p>
       </div>
 
-      <SectionHeading title="Platforms" />
       {!mounted || loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {ALL_PLATFORMS.map((p) => (
-            <Card key={p} className="animate-pulse !p-5">
-              <div className="h-5 w-3/4 rounded-lg bg-slate-100" />
-              <div className="mt-2 h-3 w-1/2 rounded-lg bg-slate-100" />
-              <div className="mt-4 h-8 w-full rounded-xl bg-slate-100" />
-            </Card>
-          ))}
-        </div>
+        <div className="py-12 text-center text-sm text-slate-500">Loading destinations...</div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {platformCards.map((d) => {
-            const meta = PLATFORM_META[d.platform]
+            const config = PLATFORM_CONFIG[d.platform]
             return (
-              <Card key={d.id}>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <PlatformIcon platform={d.platform} size={20} />
-                    <div>
-                      <p className="text-sm font-semibold text-ink-800">{meta.label}</p>
-                      <p className="text-xs text-slate-400">{d.accountName ?? 'No account connected'}</p>
+              <Card key={d.platform} className="flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-ink-800">
+                        <PlatformIcon platform={d.platform} size={20} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-ink-800">{config.label}</p>
+                        {d.accountName ? (
+                          <p className="text-xs font-medium text-teal-600">{d.accountName}</p>
+                        ) : (
+                          <p className="text-xs text-slate-400">{config.subtitle}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  {d.status === 'CONNECTED' && (
-                    <button className="focus-ring rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Settings"><Settings2 size={16} /></button>
-                  )}
+                  <p className="mt-3 text-xs text-slate-500">{config.description}</p>
                 </div>
                 <div className="mt-4 flex items-center justify-between">
                   <ConnectionLabel status={d.status} />
                   {d.status === 'CONNECTED' ? (
-                    <Button variant="outline" size="sm" onClick={() => handleDisconnect(d.id, d.platform)}>Disconnect</Button>
+                    <div className="flex items-center gap-2">
+                      {d.platform === 'YOUTUBE' && (
+                        <Button variant="outline" size="sm" onClick={() => handleConnect(d.platform)}>
+                          <RefreshCw size={12} className="mr-1" /> Reconnect
+                        </Button>
+                      )}
+                      <Button variant="outline" size="sm" onClick={() => handleDisconnect(d.id, d.platform)}>Disconnect</Button>
+                    </div>
                   ) : d.status === 'SETUP_REQUIRED' ? (
-                    <Button variant="outline" size="sm" disabled title="Awaiting API credentials — see .env.example">Setup required</Button>
+                    <Button variant="outline" size="sm" disabled title="Awaiting API credentials — see .env">Setup required</Button>
                   ) : (
                     <Button size="sm" onClick={() => handleConnect(d.platform)}><Plus size={13} /> Connect</Button>
                   )}

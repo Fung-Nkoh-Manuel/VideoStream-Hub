@@ -130,10 +130,14 @@ export async function POST(req: Request) {
             rtmpUrl: ytLive.rtmpUrl
           })
         } catch (destErr: any) {
+          let errMsg = destErr.message || 'YouTube live setup failed'
+          if (errMsg.toLowerCase().includes('insufficient') || errMsg.toLowerCase().includes('scope')) {
+            errMsg = 'YouTube live permissions missing. Go to Destinations page and click Reconnect on YouTube to grant live streaming access.'
+          }
           destinationRecords.push({
             destinationId: dest._id,
             status: 'ERROR',
-            errorMessage: destErr.message || 'YouTube live setup failed'
+            errorMessage: errMsg
           })
         }
       } else {
