@@ -125,12 +125,12 @@ export default function DestinationsPage() {
                         {d.accountName ? (
                           <p className="text-xs font-medium text-teal-600">{d.accountName}</p>
                         ) : (
-                          <p className="text-xs text-slate-400">{config.subtitle}</p>
+                          <p className="text-xs text-slate-400">{config.label} account</p>
                         )}
                       </div>
                     </div>
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">{config.description}</p>
+                  <p className="mt-3 text-xs text-slate-500">Connect {config.label} to stream live or publish content across your channels.</p>
                 </div>
                 <div className="mt-4 flex items-center justify-between">
                   <ConnectionLabel status={d.status} />
