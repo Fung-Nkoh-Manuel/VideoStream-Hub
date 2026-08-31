@@ -134,21 +134,42 @@ class LivepeerStreamingProvider implements StreamingProvider {
     const targetData = await this.request('/multistream/target', {
       method: 'POST',
       body: JSON.stringify({
-        name: destination.id,
+        name: destination.id || destination.platform,
         url: targetUrl
       })
     })
 
-    const targetId = targetData.id
-    await this.request(`/stream/${streamId}/multistream/target/${targetId}`, {
-      method: 'POST'
-    })
+    const targetId = targetData?.id || targetData?._id
+    if (targetId) {
+      try {
+        await this.request(`/stream/${streamId}/multistream/target/${targetId}`, {
+          method: 'POST',
+          body: JSON.stringify({
+            profile: 'source'
+          })
+        })
+      } catch {
+        await this.request(`/stream/${streamId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            multistream: {
+              targets: [
+                {
+                  id: targetId,
+                  profile: 'source'
+                }
+              ]
+            }
+          })
+        }).catch(() => {})
+      }
+    }
   }
 
   async removeDestination(streamId: string, destinationId: string): Promise<void> {
     await this.request(`/stream/${streamId}/multistream/target/${destinationId}`, {
       method: 'DELETE'
-    })
+    }).catch(() => {})
   }
 
   async startStream(streamId: string): Promise<void> {
