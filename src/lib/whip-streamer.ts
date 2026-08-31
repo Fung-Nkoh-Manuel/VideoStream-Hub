@@ -15,11 +15,14 @@ export async function startWhipStream(
     pc.addTrack(track, mediaStream)
   })
 
-  // Create WebRTC SDP offer
-  const offer = await pc.createOffer()
+  // Create WebRTC SDP offer (Send-only for WHIP ingest)
+  const offer = await pc.createOffer({
+    offerToReceiveAudio: false,
+    offerToReceiveVideo: false
+  })
   await pc.setLocalDescription(offer)
 
-  // Use server-side proxy endpoint to bypass CORS and include Livepeer bearer authorization
+  // Use server-side proxy endpoint to bypass CORS and route to Livepeer official WebRTC endpoint
   let proxyUrl = `/api/live/whip?streamKey=${encodeURIComponent(streamKey)}`
   if (providerStreamId) {
     proxyUrl += `&providerStreamId=${encodeURIComponent(providerStreamId)}`

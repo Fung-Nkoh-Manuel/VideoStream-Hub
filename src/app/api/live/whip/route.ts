@@ -9,17 +9,10 @@ export async function POST(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const apiKey = process.env.STREAM_PROVIDER_API_KEY
-  if (!apiKey) {
-    return NextResponse.json({ error: 'STREAM_PROVIDER_API_KEY is not configured.' }, { status: 400 })
-  }
-
   const { searchParams } = new URL(req.url)
-  const streamKey = searchParams.get('streamKey')
-  const providerStreamId = searchParams.get('providerStreamId')
-
-  if (!streamKey && !providerStreamId) {
-    return NextResponse.json({ error: 'streamKey or providerStreamId parameter is required.' }, { status: 400 })
+  const streamKeyParam = searchParams.get('streamKey') || searchParams.get('providerStreamId')
+  if (!streamKeyParam) {
+    return NextResponse.json({ error: 'streamKey parameter is required.' }, { status: 400 })
   }
 
   const sdpOffer = await req.text()
@@ -29,78 +22,50 @@ export async function POST(req: Request) {
 
   await connectToDatabase()
 
-  // Safely construct MongoDB $or query
-  const keyParam = streamKey || providerStreamId || ''
+  // Safely query MongoDB to resolve streamKey
   const orConditions: any[] = [
-    { streamKey: keyParam },
-    { providerStreamId: keyParam }
+    { streamKey: streamKeyParam },
+    { providerStreamId: streamKeyParam }
   ]
-  if (streamKey) orConditions.push({ streamKey })
-  if (providerStreamId) orConditions.push({ providerStreamId })
-  if (mongoose.Types.ObjectId.isValid(keyParam)) {
-    orConditions.push({ _id: keyParam })
+  if (mongoose.Types.ObjectId.isValid(streamKeyParam)) {
+    orConditions.push({ _id: streamKeyParam })
   }
 
-  // Find stream in database to resolve exact whipIngestUrl, providerStreamId, and streamKey
   const liveStreamDoc = await LiveStream.findOne({
     userId: session.user.id,
     $or: orConditions
   }).select('+streamKey')
 
-  const candidateKeys = Array.from(
-    new Set(
-      [
-        providerStreamId,
-        streamKey,
-        liveStreamDoc?.providerStreamId,
-        liveStreamDoc?.streamKey
-      ].filter(Boolean) as string[]
-    )
+  const effectiveStreamKey = liveStreamDoc?.streamKey || streamKeyParam
+  const apiKey = process.env.STREAM_PROVIDER_API_KEY
+
+  // Livepeer Official WebRTC WHIP Endpoints: https://livepeer.studio/webrtc/{STREAM_KEY}
+  const candidateUrls = Array.from(
+    new Set([
+      `https://livepeer.studio/webrtc/${encodeURIComponent(effectiveStreamKey)}`,
+      `https://livepeer.com/webrtc/${encodeURIComponent(effectiveStreamKey)}`,
+      `https://ingest.livepeer.studio/webrtc/${encodeURIComponent(effectiveStreamKey)}`
+    ])
   )
 
-  const candidateUrls: string[] = []
+  let lastErrText = ''
 
-  // If database document stored exact whipIngestUrl from Livepeer, try it first
-  if (liveStreamDoc?.whipIngestUrl) {
-    candidateUrls.push(liveStreamDoc.whipIngestUrl)
-  }
-
-  const rawCustomUrl = process.env.STREAM_PROVIDER_API_URL
-  const baseUrls: string[] = []
-  if (rawCustomUrl && rawCustomUrl.trim() !== '') {
-    baseUrls.push(rawCustomUrl.trim())
-  }
-  baseUrls.push(
-    'https://livepeer.studio/api',
-    'https://livepeer.com/api',
-    'https://video.livepeer.studio/api',
-    'https://ingest.livepeer.studio/api'
-  )
-
-  for (const base of baseUrls) {
-    const formattedBase = base.replace(/\/+$/, '')
-    for (const key of candidateKeys) {
-      candidateUrls.push(
-        `${formattedBase}/stream/${encodeURIComponent(key)}/whip`,
-        `${formattedBase}/whip/${encodeURIComponent(key)}`,
-        `${formattedBase}/v1/whip/${encodeURIComponent(key)}`
-      )
-    }
-  }
-
-  const uniqueUrls = Array.from(new Set(candidateUrls))
-  const attemptLogs: string[] = []
-
-  for (const whipTargetUrl of uniqueUrls) {
+  for (const whipTargetUrl of candidateUrls) {
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/sdp'
+      }
+      if (apiKey && apiKey.trim() !== '') {
+        headers['Authorization'] = `Bearer ${apiKey.trim()}`
+      }
+
+      // Livepeer WHIP endpoint uses 307 redirects to regional catalyst servers. Node fetch must follow redirects.
       const res = await fetch(whipTargetUrl, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/sdp'
-        },
+        headers,
         body: sdpOffer,
-        signal: AbortSignal.timeout(10000)
+        redirect: 'follow',
+        signal: AbortSignal.timeout(12000)
       })
 
       if (res.ok || res.status === 201) {
@@ -114,15 +79,14 @@ export async function POST(req: Request) {
       }
 
       const errTxt = await res.text()
-      attemptLogs.push(`[${res.status}] ${whipTargetUrl}: ${errTxt.slice(0, 100)}`)
+      lastErrText = `[${res.status}] ${whipTargetUrl}: ${errTxt || res.statusText}`
     } catch (err: any) {
-      attemptLogs.push(`[Err] ${whipTargetUrl}: ${err.message}`)
+      lastErrText = `[Err] ${whipTargetUrl}: ${err.message}`
     }
   }
 
-  const lastLog = attemptLogs[0] || 'Livepeer API WHIP endpoint unreachable'
   return NextResponse.json(
-    { error: `WHIP proxy connection failed: ${lastLog}` },
+    { error: `Livepeer WHIP WebRTC connection failed: ${lastErrText}` },
     { status: 502 }
   )
 }
