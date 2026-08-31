@@ -28,14 +28,32 @@ export async function GET(req: Request) {
     return NextResponse.json({ status: 'IDLE', health: 'unknown', destinations: [] })
   }
 
+  const destinationDetails = (liveStream.destinations || []).map((d: any) => ({
+    destinationId: String(d.destinationId),
+    status: d.status,
+    platformPostUrl: d.platformPostUrl,
+    errorMessage: d.errorMessage
+  }))
+
   if (isStreamingConfigured() && liveStream.providerStreamId) {
     try {
       const providerStatus = await getStreamingProvider().getStatus(liveStream.providerStreamId)
+      
+      // Merge platformPostUrl from database
+      const mergedDestinations = (providerStatus.destinations || []).map((pd: any) => {
+        const matchingDoc = destinationDetails.find((d: any) => d.destinationId === pd.destinationId)
+        return {
+          ...pd,
+          platformPostUrl: matchingDoc?.platformPostUrl || pd.platformPostUrl,
+          errorMessage: matchingDoc?.errorMessage || pd.errorMessage
+        }
+      })
+
       return NextResponse.json({
         streamId: liveStream._id.toString(),
         status: providerStatus.status,
         health: providerStatus.health,
-        destinations: providerStatus.destinations
+        destinations: mergedDestinations.length > 0 ? mergedDestinations : destinationDetails
       })
     } catch {}
   }
@@ -44,6 +62,6 @@ export async function GET(req: Request) {
     streamId: liveStream._id.toString(),
     status: liveStream.status,
     health: 'unknown',
-    destinations: liveStream.destinations
+    destinations: destinationDetails
   })
 }

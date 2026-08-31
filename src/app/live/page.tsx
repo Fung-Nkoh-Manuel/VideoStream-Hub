@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import AppShell from '@/components/AppShell'
 import { Card, Button, PlatformChip, StatusPill } from '@/components/ui'
-import { Camera, Radio, AlertTriangle, AlertCircle, Film, Mic, MicOff, Video, VideoOff } from 'lucide-react'
+import { Camera, Radio, AlertTriangle, AlertCircle, Film, Mic, MicOff, Video, VideoOff, ExternalLink } from 'lucide-react'
 import { PLATFORM_CONFIG, PlatformKey } from '@/lib/platform-connectors'
 import { startWhipStream, stopWhipStream } from '@/lib/whip-streamer'
 
@@ -53,7 +53,7 @@ function LiveStudioContent() {
 
   const [streamId, setStreamId] = useState<string | null>(null)
   const [status, setStatus] = useState<'IDLE' | 'STARTING' | 'LIVE' | 'STOPPING' | 'ENDED' | 'ERROR'>('IDLE')
-  const [destStatuses, setDestStatuses] = useState<Record<string, { status: string; errorMessage?: string }>>({})
+  const [destStatuses, setDestStatuses] = useState<Record<string, { status: string; errorMessage?: string; platformPostUrl?: string }>>({})
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [workerNotice, setWorkerNotice] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -96,6 +96,16 @@ function LiveStudioContent() {
           if (data.stream.destinations) {
             const selectedIds = data.stream.destinations.map((d: any) => d.destinationId?.toString() || d.destinationId)
             setSelected(selectedIds)
+
+            const map: Record<string, { status: string; errorMessage?: string; platformPostUrl?: string }> = {}
+            data.stream.destinations.forEach((d: any) => {
+              map[d.destinationId?.toString() || d.destinationId] = {
+                status: d.status,
+                errorMessage: d.errorMessage,
+                platformPostUrl: d.platformPostUrl
+              }
+            })
+            setDestStatuses(map)
           }
         }
       }
@@ -206,9 +216,13 @@ function LiveStudioContent() {
           if (res.ok) {
             const data = await res.json()
             if (data.destinations && Array.isArray(data.destinations)) {
-              const map: Record<string, { status: string; errorMessage?: string }> = {}
+              const map: Record<string, { status: string; errorMessage?: string; platformPostUrl?: string }> = {}
               data.destinations.forEach((d: any) => {
-                map[d.destinationId] = { status: d.status, errorMessage: d.errorMessage }
+                map[d.destinationId] = {
+                  status: d.status,
+                  errorMessage: d.errorMessage,
+                  platformPostUrl: d.platformPostUrl
+                }
               })
               setDestStatuses(map)
             }
@@ -310,6 +324,18 @@ function LiveStudioContent() {
       const currentStreamKey = createData.stream.streamKey
       const providerStreamId = createData.stream.providerStreamId
       setStreamId(createdStreamId)
+
+      if (createData.stream?.destinations) {
+        const map: Record<string, { status: string; errorMessage?: string; platformPostUrl?: string }> = {}
+        createData.stream.destinations.forEach((d: any) => {
+          map[d.destinationId?.toString() || d.destinationId] = {
+            status: d.status,
+            errorMessage: d.errorMessage,
+            platformPostUrl: d.platformPostUrl
+          }
+        })
+        setDestStatuses(map)
+      }
 
       // 2. Start stream on server & YouTube
       const startRes = await fetch('/api/live/start', {
@@ -447,7 +473,7 @@ function LiveStudioContent() {
                 <button
                   onClick={() => setSourceType('PRERECORDED')}
                   disabled={status === 'LIVE'}
-                  className={`focus-ring flex-1 rounded-lg py-2 px-2 text-center transition-colors truncate ${sourceType === 'PRERECORDED' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
+                  className={`focus-ring flex-1 rounded-lg py-2 text-center transition-colors truncate ${sourceType === 'PRERECORDED' ? 'bg-white text-ink-800 shadow-card' : 'text-slate-500 hover:text-ink-800'}`}
                 >
                   Prerecorded Video
                 </button>
@@ -627,7 +653,19 @@ function LiveStudioContent() {
 
                     return (
                       <div key={id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 px-3 py-2.5">
-                        <PlatformChip platform={d?.platform || 'CUSTOM_RTMP'} />
+                        <div className="flex items-center gap-3">
+                          <PlatformChip platform={d?.platform || 'CUSTOM_RTMP'} />
+                          {info?.platformPostUrl && (
+                            <a
+                              href={info.platformPostUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-xs font-semibold text-teal-600 hover:underline"
+                            >
+                              Watch on YouTube <ExternalLink size={12} />
+                            </a>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2">
                           {info?.errorMessage && <span className="text-xs text-red-500 truncate max-w-xs">{info.errorMessage}</span>}
                           <StatusPill status={dStatus} label={dStatus === 'LIVE' ? 'Live' : dStatus === 'PENDING' ? 'Pending' : dStatus === 'ERROR' ? 'Error' : 'Not started'} />

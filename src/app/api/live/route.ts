@@ -94,16 +94,21 @@ export async function POST(req: Request) {
       if (dest.platform === 'YOUTUBE') {
         try {
           let accessToken = dest.accessToken
-          if (!accessToken && dest.refreshToken) {
-            const tokens = await ytConnector.refreshAccessToken(dest.refreshToken)
-            accessToken = tokens.accessToken
-            dest.accessToken = tokens.accessToken
-            dest.tokenExpiresAt = tokens.expiresAt
-            await (dest as any).save?.()
+          if (dest.refreshToken) {
+            try {
+              const tokens = await ytConnector.refreshAccessToken(dest.refreshToken)
+              accessToken = tokens.accessToken
+              await Destination.updateOne(
+                { _id: dest._id },
+                { accessToken: tokens.accessToken, tokenExpiresAt: tokens.expiresAt }
+              )
+            } catch (refErr: any) {
+              console.warn('YouTube token refresh warning:', refErr.message)
+            }
           }
 
           if (!accessToken) {
-            throw new Error('YouTube access token missing. Please reconnect YouTube.')
+            throw new Error('YouTube access token missing or expired. Please reconnect YouTube in Destinations.')
           }
 
           // 1. Create real YouTube Live Broadcast & Stream
