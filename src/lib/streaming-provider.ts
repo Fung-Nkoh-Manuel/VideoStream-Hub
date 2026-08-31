@@ -25,7 +25,7 @@ export interface ProviderStreamStatus {
 }
 
 export interface StreamingProvider {
-  createStream(input: { title: string; ingestPreset?: string }): Promise<{ streamId: string; rtmpIngestUrl: string; streamKey: string }>
+  createStream(input: { title: string; ingestPreset?: string }): Promise<{ streamId: string; rtmpIngestUrl: string; streamKey: string; whipIngestUrl?: string }>
   addDestination(streamId: string, destination: ProviderDestination): Promise<void>
   removeDestination(streamId: string, destinationId: string): Promise<void>
   startStream(streamId: string): Promise<void>
@@ -42,7 +42,7 @@ class UnconfiguredStreamingProvider implements StreamingProvider {
       'Streaming service is not configured. Add STREAM_PROVIDER_API_KEY to .env to enable live multistreaming.'
     )
   }
-  async createStream(): Promise<{ streamId: string; rtmpIngestUrl: string; streamKey: string }> { this.fail() }
+  async createStream(): Promise<{ streamId: string; rtmpIngestUrl: string; streamKey: string; whipIngestUrl?: string }> { this.fail() }
   async addDestination(): Promise<void> { this.fail() }
   async removeDestination(): Promise<void> { this.fail() }
   async startStream(): Promise<void> { this.fail() }
@@ -108,7 +108,7 @@ class LivepeerStreamingProvider implements StreamingProvider {
     )
   }
 
-  async createStream(input: { title: string; ingestPreset?: string }): Promise<{ streamId: string; rtmpIngestUrl: string; streamKey: string }> {
+  async createStream(input: { title: string; ingestPreset?: string }): Promise<{ streamId: string; rtmpIngestUrl: string; streamKey: string; whipIngestUrl?: string }> {
     const data = await this.request('/stream', {
       method: 'POST',
       body: JSON.stringify({
@@ -120,8 +120,9 @@ class LivepeerStreamingProvider implements StreamingProvider {
     const streamId: string = data.id
     const streamKey: string = data.streamKey
     const rtmpIngestUrl: string = data.rtmpIngestUrl || data.ingestUrl || 'rtmp://rtmp.livepeer.studio/live'
+    const whipIngestUrl: string | undefined = data.whipIngestUrl || data.webrtcIngestUrl || data.whipUrl || `https://livepeer.studio/api/stream/${streamId}/whip`
 
-    return { streamId, rtmpIngestUrl, streamKey }
+    return { streamId, rtmpIngestUrl, streamKey, whipIngestUrl }
   }
 
   async addDestination(streamId: string, destination: ProviderDestination): Promise<void> {

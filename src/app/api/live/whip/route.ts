@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     orConditions.push({ _id: keyParam })
   }
 
-  // Find stream in database to resolve both providerStreamId and streamKey
+  // Find stream in database to resolve exact whipIngestUrl, providerStreamId, and streamKey
   const liveStreamDoc = await LiveStream.findOne({
     userId: session.user.id,
     $or: orConditions
@@ -58,6 +58,13 @@ export async function POST(req: Request) {
     )
   )
 
+  const candidateUrls: string[] = []
+
+  // If database document stored exact whipIngestUrl from Livepeer, try it first
+  if (liveStreamDoc?.whipIngestUrl) {
+    candidateUrls.push(liveStreamDoc.whipIngestUrl)
+  }
+
   const rawCustomUrl = process.env.STREAM_PROVIDER_API_URL
   const baseUrls: string[] = []
   if (rawCustomUrl && rawCustomUrl.trim() !== '') {
@@ -70,50 +77,50 @@ export async function POST(req: Request) {
     'https://ingest.livepeer.studio/api'
   )
 
-  const attemptLogs: string[] = []
-
   for (const base of baseUrls) {
     const formattedBase = base.replace(/\/+$/, '')
-
     for (const key of candidateKeys) {
-      const urlCandidates = [
+      candidateUrls.push(
         `${formattedBase}/stream/${encodeURIComponent(key)}/whip`,
         `${formattedBase}/whip/${encodeURIComponent(key)}`,
         `${formattedBase}/v1/whip/${encodeURIComponent(key)}`
-      ]
-
-      for (const whipTargetUrl of urlCandidates) {
-        try {
-          const res = await fetch(whipTargetUrl, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${apiKey.trim()}`,
-              'Content-Type': 'application/sdp'
-            },
-            body: sdpOffer,
-            signal: AbortSignal.timeout(10000)
-          })
-
-          if (res.ok || res.status === 201) {
-            const answerSdp = await res.text()
-            return new Response(answerSdp, {
-              status: 200,
-              headers: {
-                'Content-Type': 'application/sdp'
-              }
-            })
-          }
-
-          const errTxt = await res.text()
-          attemptLogs.push(`[${res.status}] ${whipTargetUrl}: ${errTxt.slice(0, 100)}`)
-        } catch (err: any) {
-          attemptLogs.push(`[Err] ${whipTargetUrl}: ${err.message}`)
-        }
-      }
+      )
     }
   }
 
-  const lastLog = attemptLogs[attemptLogs.length - 1] || 'Livepeer API WHIP endpoint unreachable'
+  const uniqueUrls = Array.from(new Set(candidateUrls))
+  const attemptLogs: string[] = []
+
+  for (const whipTargetUrl of uniqueUrls) {
+    try {
+      const res = await fetch(whipTargetUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/sdp'
+        },
+        body: sdpOffer,
+        signal: AbortSignal.timeout(10000)
+      })
+
+      if (res.ok || res.status === 201) {
+        const answerSdp = await res.text()
+        return new Response(answerSdp, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/sdp'
+          }
+        })
+      }
+
+      const errTxt = await res.text()
+      attemptLogs.push(`[${res.status}] ${whipTargetUrl}: ${errTxt.slice(0, 100)}`)
+    } catch (err: any) {
+      attemptLogs.push(`[Err] ${whipTargetUrl}: ${err.message}`)
+    }
+  }
+
+  const lastLog = attemptLogs[0] || 'Livepeer API WHIP endpoint unreachable'
   return NextResponse.json(
     { error: `WHIP proxy connection failed: ${lastLog}` },
     { status: 502 }

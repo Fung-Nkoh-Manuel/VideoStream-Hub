@@ -25,6 +25,7 @@ export interface ILiveStream extends Document {
   videoUrl?: string
   streamKey: string
   rtmpIngestUrl?: string
+  whipIngestUrl?: string
   providerStreamId?: string // id from the streaming relay provider, see streaming-provider.ts
   destinations: IStreamDestination[]
   startedAt?: Date
@@ -56,6 +57,7 @@ const LiveStreamSchema = new Schema<ILiveStream>(
     videoUrl: String,
     streamKey: { type: String, required: true, select: false },
     rtmpIngestUrl: String,
+    whipIngestUrl: String,
     providerStreamId: String,
     destinations: { type: [StreamDestinationSchema], default: [] },
     startedAt: Date,

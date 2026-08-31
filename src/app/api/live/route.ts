@@ -164,6 +164,7 @@ export async function POST(req: Request) {
       videoUrl,
       streamKey: created.streamKey,
       rtmpIngestUrl: created.rtmpIngestUrl,
+      whipIngestUrl: created.whipIngestUrl,
       providerStreamId: created.streamId,
       destinations: destinationRecords
     })
@@ -179,6 +180,7 @@ export async function POST(req: Request) {
         videoUrl: stream.videoUrl,
         streamKey: created.streamKey,
         rtmpIngestUrl: created.rtmpIngestUrl,
+        whipIngestUrl: created.whipIngestUrl,
         providerStreamId: created.streamId,
         destinations: stream.destinations
       }
