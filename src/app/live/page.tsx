@@ -308,6 +308,7 @@ function LiveStudioContent() {
 
       createdStreamId = createData.stream.id || createData.stream._id
       const currentStreamKey = createData.stream.streamKey
+      const providerStreamId = createData.stream.providerStreamId
       setStreamId(createdStreamId)
 
       // 2. Start stream on server & YouTube
@@ -333,7 +334,7 @@ function LiveStudioContent() {
         }
 
         try {
-          const pc = await startWhipStream(mediaStreamRef.current, currentStreamKey)
+          const pc = await startWhipStream(mediaStreamRef.current, currentStreamKey, providerStreamId)
           peerConnectionRef.current = pc
         } catch (whipErr: any) {
           if (createdStreamId) {

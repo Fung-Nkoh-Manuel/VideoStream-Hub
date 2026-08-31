@@ -3,7 +3,8 @@
 
 export async function startWhipStream(
   mediaStream: MediaStream,
-  streamKey: string
+  streamKey: string,
+  providerStreamId?: string
 ): Promise<RTCPeerConnection> {
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -19,7 +20,11 @@ export async function startWhipStream(
   await pc.setLocalDescription(offer)
 
   // Use server-side proxy endpoint to bypass CORS and include Livepeer bearer authorization
-  const proxyUrl = `/api/live/whip?streamKey=${encodeURIComponent(streamKey)}`
+  let proxyUrl = `/api/live/whip?streamKey=${encodeURIComponent(streamKey)}`
+  if (providerStreamId) {
+    proxyUrl += `&providerStreamId=${encodeURIComponent(providerStreamId)}`
+  }
+
   const res = await fetch(proxyUrl, {
     method: 'POST',
     headers: {

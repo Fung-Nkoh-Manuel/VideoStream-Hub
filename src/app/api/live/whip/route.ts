@@ -15,9 +15,11 @@ export async function POST(req: Request) {
   }
 
   const { searchParams } = new URL(req.url)
-  const keyParam = searchParams.get('streamKey') || searchParams.get('providerStreamId')
-  if (!keyParam) {
-    return NextResponse.json({ error: 'streamKey parameter is required.' }, { status: 400 })
+  const streamKey = searchParams.get('streamKey')
+  const providerStreamId = searchParams.get('providerStreamId')
+
+  if (!streamKey && !providerStreamId) {
+    return NextResponse.json({ error: 'streamKey or providerStreamId parameter is required.' }, { status: 400 })
   }
 
   const sdpOffer = await req.text()
@@ -27,12 +29,14 @@ export async function POST(req: Request) {
 
   await connectToDatabase()
 
-  // Construct MongoDB $or query safely without triggering CastError on non-ObjectId string values
+  // Safely construct MongoDB $or query
+  const keyParam = streamKey || providerStreamId || ''
   const orConditions: any[] = [
     { streamKey: keyParam },
     { providerStreamId: keyParam }
   ]
-
+  if (streamKey) orConditions.push({ streamKey })
+  if (providerStreamId) orConditions.push({ providerStreamId })
   if (mongoose.Types.ObjectId.isValid(keyParam)) {
     orConditions.push({ _id: keyParam })
   }
@@ -46,7 +50,8 @@ export async function POST(req: Request) {
   const candidateKeys = Array.from(
     new Set(
       [
-        keyParam,
+        providerStreamId,
+        streamKey,
         liveStreamDoc?.providerStreamId,
         liveStreamDoc?.streamKey
       ].filter(Boolean) as string[]
@@ -58,9 +63,14 @@ export async function POST(req: Request) {
   if (rawCustomUrl && rawCustomUrl.trim() !== '') {
     baseUrls.push(rawCustomUrl.trim())
   }
-  baseUrls.push('https://livepeer.studio/api', 'https://livepeer.com/api')
+  baseUrls.push(
+    'https://livepeer.studio/api',
+    'https://livepeer.com/api',
+    'https://video.livepeer.studio/api',
+    'https://ingest.livepeer.studio/api'
+  )
 
-  let lastErrText = ''
+  const attemptLogs: string[] = []
 
   for (const base of baseUrls) {
     const formattedBase = base.replace(/\/+$/, '')
@@ -68,7 +78,8 @@ export async function POST(req: Request) {
     for (const key of candidateKeys) {
       const urlCandidates = [
         `${formattedBase}/stream/${encodeURIComponent(key)}/whip`,
-        `${formattedBase}/whip/${encodeURIComponent(key)}`
+        `${formattedBase}/whip/${encodeURIComponent(key)}`,
+        `${formattedBase}/v1/whip/${encodeURIComponent(key)}`
       ]
 
       for (const whipTargetUrl of urlCandidates) {
@@ -94,18 +105,17 @@ export async function POST(req: Request) {
           }
 
           const errTxt = await res.text()
-          if (res.status !== 404) {
-            lastErrText = errTxt
-          }
+          attemptLogs.push(`[${res.status}] ${whipTargetUrl}: ${errTxt.slice(0, 100)}`)
         } catch (err: any) {
-          lastErrText = err.message
+          attemptLogs.push(`[Err] ${whipTargetUrl}: ${err.message}`)
         }
       }
     }
   }
 
+  const lastLog = attemptLogs[attemptLogs.length - 1] || 'Livepeer API WHIP endpoint unreachable'
   return NextResponse.json(
-    { error: `WHIP proxy connection failed: ${lastErrText || 'Livepeer API WHIP endpoint not found or unreachable'}` },
+    { error: `WHIP proxy connection failed: ${lastLog}` },
     { status: 502 }
   )
 }
