@@ -362,6 +362,19 @@ function LiveStudioContent() {
         try {
           const pc = await startWhipStream(mediaStreamRef.current, currentStreamKey, providerStreamId)
           peerConnectionRef.current = pc
+
+          // After WHIP connects, wait for frames to flow through Livepeer → YouTube RTMP,
+          // then transition the YouTube broadcast from "upcoming" to "live".
+          // YouTube rejects the transition if no frames have arrived yet.
+          setTimeout(async () => {
+            try {
+              await fetch('/api/live/activate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ streamId: createdStreamId })
+              })
+            } catch {}
+          }, 8000)
         } catch (whipErr: any) {
           if (createdStreamId) {
             await fetch('/api/live/stop', {
